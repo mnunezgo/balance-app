@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Balance — Gastos y Deudas</title>
-<meta name="description" content="Registra tus gastos por categoría, haz seguimiento de cada pago de tus deudas y mira tu progreso mes a mes.">
+<title>Balance — Finanzas Personales</title>
+<meta name="description" content="Registra tus ingresos, gastos y deudas, y mide tu salud financiera con recomendaciones automáticas.">
 <meta name="theme-color" content="#2B6F68">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -19,12 +19,12 @@
 <body>
 
 <div class="wrap">
-  <h2 class="sr-only">Balance: aplicación personal para registrar gastos y deudas, con pagos recurrentes, historial de pagos por deuda, tendencia mensual, recordatorios y exportación a Excel.</h2>
+  <h2 class="sr-only">Balance: aplicación personal de finanzas para registrar ingresos, gastos y deudas, con pagos recurrentes, calendario de cuotas, medidor de salud financiera con recomendaciones, tendencia mensual y exportación a Excel.</h2>
 
   <header class="top">
     <div class="title-group">
       <h1>Balance</h1>
-      <span class="tag">Gastos y deudas, todo en un lugar</span>
+      <span class="tag">Tu control financiero completo</span>
     </div>
     <div class="header-actions">
       <button type="button" class="icon-btn" id="btn-notify" title="Activar notificaciones" hidden>
@@ -45,13 +45,29 @@
 
   <nav class="tabs" role="tablist" aria-label="Secciones">
     <button role="tab" aria-selected="true" data-tab="resumen">Resumen</button>
+    <button role="tab" aria-selected="false" data-tab="ingresos">Ingresos</button>
     <button role="tab" aria-selected="false" data-tab="gastos">Gastos</button>
     <button role="tab" aria-selected="false" data-tab="deudas">Deudas</button>
     <button role="tab" aria-selected="false" data-tab="progreso">Progreso</button>
   </nav>
 
   <section class="panel active" id="panel-resumen">
+    <div class="chart-card salud-card" id="salud-card">
+      <div class="salud-head">
+        <h3>Salud financiera — este mes</h3>
+        <p class="hint">Combina tu tasa de ahorro y tu relación deuda/ingreso en un solo puntaje.</p>
+      </div>
+      <div class="salud-body">
+        <svg id="gauge" viewBox="0 0 200 115" role="img" aria-label="Medidor de salud financiera de 0 a 100"></svg>
+        <div class="salud-recs" id="salud-recs"></div>
+      </div>
+    </div>
+
     <div class="cards">
+      <div class="card pos">
+        <div class="label">Ingresos este mes</div>
+        <div class="value mono" id="sum-ingresos-mes">$0</div>
+      </div>
       <div class="card neg">
         <div class="label">Gastado este mes</div>
         <div class="value mono" id="sum-gastos-mes">$0</div>
@@ -60,13 +76,13 @@
         <div class="label">Pagado a deudas este mes</div>
         <div class="value mono" id="sum-pagado-mes">$0</div>
       </div>
+      <div class="card" id="card-balance">
+        <div class="label">Balance del mes</div>
+        <div class="value mono" id="sum-balance-mes">$0</div>
+      </div>
       <div class="card neg">
         <div class="label">Deuda pendiente</div>
         <div class="value mono" id="sum-deuda-pendiente">$0</div>
-      </div>
-      <div class="card" id="card-balance">
-        <div class="label">Comprometido total (mes + deudas)</div>
-        <div class="value mono" id="sum-total">$0</div>
       </div>
     </div>
 
@@ -90,6 +106,61 @@
       <h3>Próximos vencimientos</h3>
       <ul class="list" id="upcoming-list"></ul>
     </div>
+  </section>
+
+  <section class="panel" id="panel-ingresos">
+    <div class="section-head">
+      <h2>Ingresos recurrentes de este mes</h2>
+      <button type="button" class="small" id="btn-toggle-ingreso-recurrente">+ Agregar recurrente</button>
+    </div>
+
+    <form class="entry" id="form-ingreso-recurrente" hidden>
+      <div class="row">
+        <label>Nombre
+          <input type="text" id="ri-nombre" placeholder="Ej. Salario, Renta que cobro..." required>
+        </label>
+        <label>Fuente
+          <select id="ri-fuente" required></select>
+        </label>
+        <label>Monto
+          <input type="text" id="ri-monto" placeholder="0.00" required>
+        </label>
+        <label>Día del mes
+          <input type="number" id="ri-dia" min="1" max="28" placeholder="1-28" required>
+        </label>
+      </div>
+      <div class="actions-row"><button type="submit" class="primary">Guardar recurrente</button></div>
+    </form>
+
+    <ul class="list" id="ingresos-recurrentes-list"></ul>
+
+    <div class="section-head" style="margin-top:26px;">
+      <h2>Ingresos</h2>
+      <div class="filters">
+        <select id="filter-mes-ingreso"></select>
+        <select id="filter-fuente"></select>
+      </div>
+    </div>
+
+    <form class="entry" id="form-ingreso">
+      <div class="row">
+        <label>Fecha
+          <input type="date" id="i-fecha" required>
+        </label>
+        <label>Fuente
+          <select id="i-fuente" required></select>
+        </label>
+        <label>Monto
+          <input type="text" id="i-monto" placeholder="0.00" required>
+        </label>
+      </div>
+      <div class="row">
+        <textarea id="i-desc" placeholder="Descripción (opcional) — ej. Quincena, proyecto X..."></textarea>
+      </div>
+      <div class="actions-row"><button type="submit" class="primary">Agregar ingreso</button></div>
+    </form>
+
+    <ul class="list" id="ingresos-list"></ul>
   </section>
 
   <section class="panel" id="panel-gastos">
@@ -217,11 +288,19 @@
         <div class="label">Promedio mensual de gasto (6 meses)</div>
         <div class="value mono" id="prog-promedio">$0</div>
       </div>
+      <div class="card">
+        <div class="label">Deuda / ingreso (DTI) — este mes</div>
+        <div class="value mono" id="prog-dti">—</div>
+      </div>
+      <div class="card">
+        <div class="label">Tasa de ahorro — este mes</div>
+        <div class="value mono" id="prog-ahorro">—</div>
+      </div>
     </div>
 
     <div class="chart-card">
-      <h3>Tendencia mensual — gastos vs. pagos a deudas</h3>
-      <svg id="chart-tendencia" viewBox="0 0 600 220" style="width:100%; height:auto; max-height:240px;" role="img" aria-label="Gráfico comparando gastos mensuales y pagos a deudas de los últimos 6 meses"></svg>
+      <h3>Tendencia mensual — ingresos, gastos y pagos a deudas</h3>
+      <svg id="chart-tendencia" viewBox="0 0 600 220" style="width:100%; height:auto; max-height:240px;" role="img" aria-label="Gráfico comparando ingresos, gastos y pagos a deudas de los últimos 6 meses"></svg>
       <div class="legend" id="tendencia-legend"></div>
     </div>
 

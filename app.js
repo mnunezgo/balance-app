@@ -3,6 +3,7 @@
 
   var CATS = ["Comida","Transporte","Vivienda","Servicios","Entretenimiento","Salud","Educación","Otros"];
   var CAT_COLOR = {"Comida":"var(--cat-1)","Transporte":"var(--cat-2)","Vivienda":"var(--cat-3)","Servicios":"var(--cat-4)","Entretenimiento":"var(--cat-5)","Salud":"var(--cat-6)","Educación":"var(--cat-7)","Otros":"var(--cat-8)"};
+  var FUENTES = ["Salario","Freelance/Independiente","Negocio propio","Inversiones","Renta","Pensión","Otro"];
   var TIPOS_DEUDA = ["Tarjeta de crédito","Préstamo personal","Préstamo hipotecario","Préstamo automotriz","Préstamo estudiantil","Servicio/Recibo","Préstamo entre personas","Otro"];
   var FRECUENCIAS = [
     {value:'unica', label:'Fecha única'},
@@ -15,7 +16,7 @@
   var STORAGE_KEY = "balance-app-data-v3";
   var LEGACY_KEYS = ["balance-app-data-v2", "balance-app-data-v1"];
 
-  var state = { gastos: [], deudas: [], recurrentes: [], remindersShown: {} };
+  var state = { ingresos: [], ingresosRecurrentes: [], gastos: [], deudas: [], recurrentes: [], remindersShown: {} };
   var bannerTimer = null;
 
   var fmt = new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN', maximumFractionDigits:2});
@@ -122,7 +123,7 @@
   }
 
   function migrate(parsed){
-    var data = { gastos: parsed.gastos||[], deudas: parsed.deudas||[], recurrentes: parsed.recurrentes||[], remindersShown: parsed.remindersShown||{} };
+    var data = { ingresos: parsed.ingresos||[], ingresosRecurrentes: parsed.ingresosRecurrentes||[], gastos: parsed.gastos||[], deudas: parsed.deudas||[], recurrentes: parsed.recurrentes||[], remindersShown: parsed.remindersShown||{} };
     data.deudas.forEach(function(d){
       if (!d.pagos){
         d.pagos = [];
@@ -179,10 +180,22 @@
     }
     CATS.forEach(function(c){ var o=document.createElement('option'); o.value=c; o.textContent=c; sel.appendChild(o); });
   }
+  function fillFuenteSelect(sel, withAll){
+    sel.innerHTML = '';
+    if (withAll){
+      var allOpt = document.createElement('option'); allOpt.value=''; allOpt.textContent='Todas las fuentes';
+      sel.appendChild(allOpt);
+    }
+    FUENTES.forEach(function(f){ var o=document.createElement('option'); o.value=f; o.textContent=f; sel.appendChild(o); });
+  }
   fillCategorySelect(document.getElementById('g-categoria'), false);
   fillCategorySelect(document.getElementById('filter-cat'), true);
   fillCategorySelect(document.getElementById('r-categoria'), false);
+  fillFuenteSelect(document.getElementById('i-fuente'), false);
+  fillFuenteSelect(document.getElementById('filter-fuente'), true);
+  fillFuenteSelect(document.getElementById('ri-fuente'), false);
   document.getElementById('g-fecha').value = todayISO();
+  document.getElementById('i-fecha').value = todayISO();
 
   var dTipoSel = document.getElementById('d-tipo');
   TIPOS_DEUDA.forEach(function(t){ var o=document.createElement('option'); o.value=t; o.textContent=t; dTipoSel.appendChild(o); });
@@ -190,7 +203,8 @@
   FRECUENCIAS.forEach(function(f){ var o=document.createElement('option'); o.value=f.value; o.textContent=f.label; dFreqSel.appendChild(o); });
 
   [document.getElementById('g-monto'), document.getElementById('d-total'), document.getElementById('d-pagado'),
-   document.getElementById('r-monto'), document.getElementById('d-monto-cuota')]
+   document.getElementById('r-monto'), document.getElementById('d-monto-cuota'),
+   document.getElementById('i-monto'), document.getElementById('ri-monto')]
     .forEach(function(el){ if (el) attachMoneyInput(el); });
 
   function updateCuotaFieldsVisibility(){
@@ -215,12 +229,12 @@
   });
 
   // ---- month filter options ----
-  function refreshMonthFilter(){
-    var sel = document.getElementById('filter-mes');
+  function fillMonthSelect(selId, items){
+    var sel = document.getElementById(selId);
     var current = sel.value;
     var months = {};
     months[todayISO().slice(0,7)] = true;
-    state.gastos.forEach(function(g){ months[monthKey(g.fecha)] = true; });
+    items.forEach(function(x){ months[monthKey(x.fecha)] = true; });
     var keys = Object.keys(months).sort().reverse();
     sel.innerHTML = '';
     var allOpt = document.createElement('option'); allOpt.value=''; allOpt.textContent='Todos los meses'; sel.appendChild(allOpt);
@@ -232,15 +246,90 @@
     });
     if (current && months[current]) sel.value = current; else sel.value = todayISO().slice(0,7);
   }
+  function refreshMonthFilter(){
+    fillMonthSelect('filter-mes', state.gastos);
+    fillMonthSelect('filter-mes-ingreso', state.ingresos);
+  }
 
   // ---- rendering ----
   function renderAll(){
     refreshMonthFilter();
+    renderIngresosRecurrentes();
+    renderIngresos();
     renderRecurrentes();
     renderGastos();
     renderDeudas();
     renderResumen();
     renderProgreso();
+  }
+
+  function renderIngresosRecurrentes(){
+    var mes = todayISO().slice(0,7);
+    var list = document.getElementById('ingresos-recurrentes-list');
+    list.innerHTML = '';
+    if (!state.ingresosRecurrentes.length){
+      var e = document.createElement('li'); e.className='empty'; e.textContent='No tienes ingresos recurrentes todavía. Agrega tu salario, mesada, renta que cobras...';
+      list.appendChild(e); return;
+    }
+    state.ingresosRecurrentes.slice().sort(function(a,b){ return (a.dia||0)-(b.dia||0); }).forEach(function(r){
+      var linked = state.ingresos.find(function(i){ return i.recurrenteId===r.id && monthKey(i.fecha)===mes; });
+      var li = document.createElement('li'); li.className = 'rec-item' + (linked ? ' checked':'');
+      var box = document.createElement('span'); box.className='checkbox';
+      box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+      box.addEventListener('click', function(){ toggleIngresoRecurrente(r, linked); });
+      var main = document.createElement('div'); main.className='main';
+      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = r.nombre;
+      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = r.fuente + ' · día ' + r.dia + ' de cada mes';
+      main.appendChild(desc); main.appendChild(meta);
+      var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(r.monto);
+      var del = document.createElement('button'); del.className='del'; del.setAttribute('aria-label','Eliminar recurrente'); del.textContent='✕';
+      del.addEventListener('click', function(){ deleteIngresoRecurrente(r.id); });
+      li.appendChild(box); li.appendChild(main); li.appendChild(amount); li.appendChild(del);
+      list.appendChild(li);
+    });
+  }
+
+  function toggleIngresoRecurrente(r, existingIngreso){
+    if (existingIngreso){
+      deleteIngreso(existingIngreso.id);
+    } else {
+      addIngreso({fecha: todayISO(), fuente: r.fuente, monto: r.monto, descripcion: r.nombre, recurrenteId: r.id});
+    }
+  }
+
+  function deleteIngresoRecurrente(id){
+    state.ingresosRecurrentes = state.ingresosRecurrentes.filter(function(r){ return r.id!==id; });
+    save(); renderAll();
+  }
+
+  function renderIngresos(){
+    var list = document.getElementById('ingresos-list');
+    var mes = document.getElementById('filter-mes-ingreso').value;
+    var fuente = document.getElementById('filter-fuente').value;
+    var items = state.ingresos.filter(function(i){
+      if (mes && monthKey(i.fecha) !== mes) return false;
+      if (fuente && i.fuente !== fuente) return false;
+      return true;
+    }).sort(function(a,b){ return (b.fecha||'').localeCompare(a.fecha||'') || (b.createdAt||0)-(a.createdAt||0); });
+
+    list.innerHTML = '';
+    if (!items.length){
+      var e = document.createElement('li'); e.className='empty'; e.textContent='No hay ingresos registrados para este filtro.';
+      list.appendChild(e); return;
+    }
+    items.forEach(function(i){
+      var li = document.createElement('li'); li.className='item';
+      var dot = document.createElement('span'); dot.className='dot'; dot.style.background = 'var(--success)';
+      var main = document.createElement('div'); main.className='main';
+      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = i.descripcion ? i.descripcion : i.fuente;
+      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = i.fuente + ' · ' + formatDate(i.fecha) + (i.recurrenteId ? ' · recurrente' : '');
+      main.appendChild(desc); main.appendChild(meta);
+      var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(i.monto);
+      var del = document.createElement('button'); del.className='del'; del.setAttribute('aria-label','Eliminar ingreso'); del.textContent='✕';
+      del.addEventListener('click', function(){ deleteIngreso(i.id); });
+      li.appendChild(dot); li.appendChild(main); li.appendChild(amount); li.appendChild(del);
+      list.appendChild(li);
+    });
   }
 
   function renderRecurrentes(){
@@ -481,10 +570,141 @@
     });
   }
 
+  // ---- financial health gauge + recommendations ----
+  function polarPoint(cx, cy, r, angleDeg){
+    var rad = angleDeg * Math.PI/180;
+    return { x: cx + r*Math.cos(rad), y: cy + r*Math.sin(rad) };
+  }
+  function describeArc(cx, cy, r, startAngle, endAngle){
+    var start = polarPoint(cx, cy, r, startAngle);
+    var end = polarPoint(cx, cy, r, endAngle);
+    var largeArcFlag = (endAngle-startAngle) <= 180 ? "0" : "1";
+    return ["M", start.x, start.y, "A", r, r, 0, largeArcFlag, 1, end.x, end.y].join(" ");
+  }
+
+  function computeHealthScore(ingreso, gastoTotal, dti){
+    if (ingreso <= 0) return null;
+    var tasaAhorro = (ingreso - gastoTotal) / ingreso;
+    var savingsComponent = Math.max(0, Math.min(1, (tasaAhorro + 0.2) / 0.4)); // -20%→0, +20%→1
+    var dtiComponent = Math.max(0, Math.min(1, 1 - (dti / 0.5))); // 0%→1, 50%+→0
+    return Math.round(100 * (0.55*savingsComponent + 0.45*dtiComponent));
+  }
+
+  function buildRecommendations(ingreso, totalGastosMes, pagadoMes, deudaPendiente, gastosMes){
+    var recs = [];
+    if (ingreso <= 0){
+      recs.push({level:'info', text:'Agrega tus ingresos del mes en la pestaña "Ingresos" para ver tu salud financiera y recomendaciones personalizadas.'});
+      return recs;
+    }
+    var gastoTotal = totalGastosMes + pagadoMes;
+    var tasaAhorro = (ingreso - gastoTotal) / ingreso;
+    var dti = ingreso>0 ? (pagadoMes/ingreso) : 0;
+
+    if (gastoTotal > ingreso){
+      recs.push({level:'critical', text:'Este mes gastaste ' + money(gastoTotal-ingreso) + ' más de lo que ingresaste. Estás usando ahorros o deuda para cubrir el mes — revisa tus gastos variables cuanto antes.'});
+    } else if (tasaAhorro < 0.1){
+      recs.push({level:'warning', text:'Tu tasa de ahorro este mes es ' + Math.round(tasaAhorro*100) + '%, por debajo del 20% recomendado (regla 50/30/20). Busca reducir gastos hormiga o renegociar servicios fijos.'});
+    } else if (tasaAhorro >= 0.2){
+      recs.push({level:'good', text:'Estás ahorrando ' + Math.round(tasaAhorro*100) + '% de tus ingresos este mes — por encima de la meta del 20%. Considera invertir el excedente o adelantar pagos de deuda.'});
+    } else {
+      recs.push({level:'good', text:'Tu tasa de ahorro este mes es ' + Math.round(tasaAhorro*100) + '%. Vas por buen camino hacia el 20% recomendado.'});
+    }
+
+    if (dti > 0.43){
+      recs.push({level:'critical', text:'Tus pagos de deuda equivalen al ' + Math.round(dti*100) + '% de tus ingresos — por encima del 43%, el umbral que la mayoría de instituciones financieras consideran de alto riesgo.'});
+    } else if (dti > 0.36){
+      recs.push({level:'warning', text:'Tus pagos de deuda son el ' + Math.round(dti*100) + '% de tus ingresos. Los expertos recomiendan mantener este ratio (deuda/ingreso) bajo 36%.'});
+    }
+
+    var byCat = {};
+    gastosMes.forEach(function(g){ byCat[g.categoria] = (byCat[g.categoria]||0) + Number(g.monto||0); });
+    var topCat = null, topVal = 0;
+    Object.keys(byCat).forEach(function(c){ if (byCat[c] > topVal){ topVal = byCat[c]; topCat = c; } });
+    if (topCat && totalGastosMes>0 && (topVal/totalGastosMes) > 0.4){
+      recs.push({level:'warning', text:'"' + topCat + '" concentra el ' + Math.round((topVal/totalGastosMes)*100) + '% de tus gastos del mes (' + money(topVal) + '). Vale la pena revisar si se puede reducir.'});
+    }
+
+    if (deudaPendiente > 0 && deudaPendiente > ingreso*6){
+      recs.push({level:'info', text:'Tu deuda pendiente total equivale a más de 6 meses de tus ingresos actuales. Prioriza liquidar primero las deudas con mayor interés.'});
+    }
+
+    if (!recs.length) recs.push({level:'good', text:'Tu salud financiera se ve saludable este mes. Sigue registrando todo para mantener el control.'});
+    return recs.slice(0,4);
+  }
+
+  function renderSaludFinanciera(ingreso, totalGastosMes, pagadoMes, deudaPendiente, gastosMes){
+    var card = document.getElementById('salud-card');
+    var score = computeHealthScore(ingreso, totalGastosMes+pagadoMes, ingreso>0 ? pagadoMes/ingreso : 0);
+    var cs = getComputedStyle(document.documentElement);
+
+    var svg = document.getElementById('gauge');
+    svg.innerHTML = '';
+    var cx=100, cy=95, r=78, rNeedle=64;
+    var track = document.createElementNS('http://www.w3.org/2000/svg','path');
+    track.setAttribute('d', describeArc(cx,cy,r,180,360));
+    track.setAttribute('fill','none'); track.setAttribute('stroke', cs.getPropertyValue('--surface-2'));
+    track.setAttribute('stroke-width','16'); track.setAttribute('stroke-linecap','round');
+    svg.appendChild(track);
+
+    var zones = [
+      {a0:180, a1:180+0.4*180, color: cs.getPropertyValue('--danger')},
+      {a0:180+0.4*180, a1:180+0.7*180, color: cs.getPropertyValue('--warning')},
+      {a0:180+0.7*180, a1:360, color: cs.getPropertyValue('--success')}
+    ];
+    zones.forEach(function(z){
+      var arc = document.createElementNS('http://www.w3.org/2000/svg','path');
+      arc.setAttribute('d', describeArc(cx,cy,r,z.a0,z.a1));
+      arc.setAttribute('fill','none'); arc.setAttribute('stroke', z.color);
+      arc.setAttribute('stroke-width','16'); arc.setAttribute('stroke-linecap','butt');
+      arc.setAttribute('opacity', score==null ? '0.35' : '1');
+      svg.appendChild(arc);
+    });
+
+    var label = document.createElementNS('http://www.w3.org/2000/svg','text');
+    label.setAttribute('x', cx); label.setAttribute('y', cy-6);
+    label.setAttribute('text-anchor','middle'); label.setAttribute('font-size','34'); label.setAttribute('font-weight','600');
+    label.setAttribute('fill', cs.getPropertyValue('--ink'));
+    label.textContent = score==null ? '—' : score;
+    svg.appendChild(label);
+
+    var sub = document.createElementNS('http://www.w3.org/2000/svg','text');
+    sub.setAttribute('x', cx); sub.setAttribute('y', cy+18);
+    sub.setAttribute('text-anchor','middle'); sub.setAttribute('font-size','12');
+    sub.setAttribute('fill', cs.getPropertyValue('--ink-soft'));
+    sub.textContent = score==null ? 'Sin datos' : (score>=70?'Saludable':score>=40?'En riesgo':'Crítico');
+    svg.appendChild(sub);
+
+    if (score != null){
+      var needleAngle = 180 + (score/100)*180;
+      var tip = polarPoint(cx, cy, rNeedle, needleAngle);
+      var needle = document.createElementNS('http://www.w3.org/2000/svg','line');
+      needle.setAttribute('x1', cx); needle.setAttribute('y1', cy);
+      needle.setAttribute('x2', tip.x); needle.setAttribute('y2', tip.y);
+      needle.setAttribute('stroke', cs.getPropertyValue('--ink')); needle.setAttribute('stroke-width','3'); needle.setAttribute('stroke-linecap','round');
+      svg.appendChild(needle);
+      var hub = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      hub.setAttribute('cx', cx); hub.setAttribute('cy', cy); hub.setAttribute('r','5');
+      hub.setAttribute('fill', cs.getPropertyValue('--ink'));
+      svg.appendChild(hub);
+    }
+
+    var recsWrap = document.getElementById('salud-recs');
+    recsWrap.innerHTML = '';
+    buildRecommendations(ingreso, totalGastosMes, pagadoMes, deudaPendiente, gastosMes).forEach(function(r){
+      var item = document.createElement('div'); item.className = 'rec-tip rec-'+r.level;
+      item.textContent = r.text;
+      recsWrap.appendChild(item);
+    });
+
+    card.classList.toggle('no-data', score==null);
+  }
+
   function renderResumen(){
     var mes = todayISO().slice(0,7);
     var gastosMes = state.gastos.filter(function(g){ return monthKey(g.fecha)===mes; });
     var totalGastosMes = gastosMes.reduce(function(s,g){ return s+Number(g.monto||0); }, 0);
+    var ingresosMes = state.ingresos.filter(function(i){ return monthKey(i.fecha)===mes; });
+    var totalIngresosMes = ingresosMes.reduce(function(s,i){ return s+Number(i.monto||0); }, 0);
     var pagadoMes = 0;
     state.deudas.forEach(function(d){
       (d.pagos||[]).forEach(function(p){ if (monthKey(p.fecha)===mes) pagadoMes += Number(p.monto||0); });
@@ -493,11 +713,18 @@
       var r = Number(d.montoTotal||0)-pagadoTotal(d);
       return s + (r>0 ? r : 0);
     }, 0);
+    var balanceMes = totalIngresosMes - totalGastosMes - pagadoMes;
 
+    document.getElementById('sum-ingresos-mes').textContent = money(totalIngresosMes);
     document.getElementById('sum-gastos-mes').textContent = money(totalGastosMes);
     document.getElementById('sum-pagado-mes').textContent = money(pagadoMes);
     document.getElementById('sum-deuda-pendiente').textContent = money(deudaPendiente);
-    document.getElementById('sum-total').textContent = money(totalGastosMes + deudaPendiente);
+    var balanceEl = document.getElementById('sum-balance-mes');
+    balanceEl.textContent = money(balanceMes);
+    balanceEl.closest('.card').classList.toggle('neg', balanceMes < 0);
+    balanceEl.closest('.card').classList.toggle('pos', balanceMes >= 0);
+
+    renderSaludFinanciera(totalIngresosMes, totalGastosMes, pagadoMes, deudaPendiente, gastosMes);
 
     var byCat = {};
     CATS.forEach(function(c){ byCat[c]=0; });
@@ -596,15 +823,23 @@
     var cursor = todayISO().slice(0,7);
     for (var i=5;i>=0;i--){ months.push(addMonthsKey(cursor,-i)); }
 
-    var gastoPorMes = {}, pagoPorMes = {};
-    months.forEach(function(m){ gastoPorMes[m]=0; pagoPorMes[m]=0; });
+    var ingresoPorMes = {}, gastoPorMes = {}, pagoPorMes = {};
+    months.forEach(function(m){ ingresoPorMes[m]=0; gastoPorMes[m]=0; pagoPorMes[m]=0; });
+    state.ingresos.forEach(function(i){ var mk=monthKey(i.fecha); if (mk in ingresoPorMes) ingresoPorMes[mk]+=Number(i.monto||0); });
     state.gastos.forEach(function(g){ var mk=monthKey(g.fecha); if (mk in gastoPorMes) gastoPorMes[mk]+=Number(g.monto||0); });
     state.deudas.forEach(function(d){ (d.pagos||[]).forEach(function(p){ var mk=monthKey(p.fecha); if (mk in pagoPorMes) pagoPorMes[mk]+=Number(p.monto||0); }); });
 
     var promedio = months.reduce(function(s,m){ return s+gastoPorMes[m]; }, 0) / months.length;
     document.getElementById('prog-promedio').textContent = money(promedio);
 
-    drawTendencia(months, gastoPorMes, pagoPorMes);
+    var ingresoMesActual = ingresoPorMes[cursor] || 0;
+    var pagoMesActual = pagoPorMes[cursor] || 0;
+    var dtiEl = document.getElementById('prog-dti');
+    if (dtiEl) dtiEl.textContent = ingresoMesActual>0 ? Math.round((pagoMesActual/ingresoMesActual)*100)+'%' : '—';
+    var ahorroEl = document.getElementById('prog-ahorro');
+    if (ahorroEl) ahorroEl.textContent = ingresoMesActual>0 ? Math.round(((ingresoMesActual-gastoPorMes[cursor]-pagoMesActual)/ingresoMesActual)*100)+'%' : '—';
+
+    drawTendencia(months, ingresoPorMes, gastoPorMes, pagoPorMes);
 
     var wrap = document.getElementById('progreso-deudas-list');
     wrap.innerHTML = '';
@@ -631,7 +866,7 @@
     });
   }
 
-  function drawTendencia(months, gastoPorMes, pagoPorMes){
+  function drawTendencia(months, ingresoPorMes, gastoPorMes, pagoPorMes){
     var svg = document.getElementById('chart-tendencia');
     svg.innerHTML = '';
     var w = 600, h = 220;
@@ -639,32 +874,30 @@
     var plotW = w - padL*2;
     var plotH = h - padTop - padBottom;
     var n = months.length;
-    var groupGap = 18;
+    var groupGap = 16;
     var groupW = (plotW - groupGap*(n-1)) / n;
-    var barGap = 4;
-    var barW = (groupW - barGap) / 2;
-    var max = Math.max.apply(null, months.map(function(m){ return Math.max(gastoPorMes[m], pagoPorMes[m]); }).concat([1]));
+    var barGap = 3;
+    var barW = (groupW - barGap*2) / 3;
+    var max = Math.max.apply(null, months.map(function(m){ return Math.max(ingresoPorMes[m], gastoPorMes[m], pagoPorMes[m]); }).concat([1]));
     var cs = getComputedStyle(document.documentElement);
+    var colorIngreso = cs.getPropertyValue('--success');
     var colorGasto = cs.getPropertyValue('--danger');
     var colorPago = cs.getPropertyValue('--accent');
 
+    function bar(x, val, color){
+      var hgt = max>0 ? (val/max)*plotH : 0;
+      var rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      rect.setAttribute('x', x); rect.setAttribute('y', padTop+(plotH-hgt));
+      rect.setAttribute('width', barW); rect.setAttribute('height', Math.max(hgt,1));
+      rect.setAttribute('rx', 2); rect.setAttribute('fill', color);
+      svg.appendChild(rect);
+    }
+
     months.forEach(function(m, i){
       var gx = padL + i*(groupW+groupGap);
-      var gVal = gastoPorMes[m], pVal = pagoPorMes[m];
-      var gH = max>0 ? (gVal/max)*plotH : 0;
-      var pH = max>0 ? (pVal/max)*plotH : 0;
-
-      var r1 = document.createElementNS('http://www.w3.org/2000/svg','rect');
-      r1.setAttribute('x', gx); r1.setAttribute('y', padTop+(plotH-gH));
-      r1.setAttribute('width', barW); r1.setAttribute('height', Math.max(gH,1));
-      r1.setAttribute('rx', 2); r1.setAttribute('fill', colorGasto);
-      svg.appendChild(r1);
-
-      var r2 = document.createElementNS('http://www.w3.org/2000/svg','rect');
-      r2.setAttribute('x', gx+barW+barGap); r2.setAttribute('y', padTop+(plotH-pH));
-      r2.setAttribute('width', barW); r2.setAttribute('height', Math.max(pH,1));
-      r2.setAttribute('rx', 2); r2.setAttribute('fill', colorPago);
-      svg.appendChild(r2);
+      bar(gx, ingresoPorMes[m], colorIngreso);
+      bar(gx+barW+barGap, gastoPorMes[m], colorGasto);
+      bar(gx+(barW+barGap)*2, pagoPorMes[m], colorPago);
 
       var label = document.createElementNS('http://www.w3.org/2000/svg','text');
       label.setAttribute('x', gx+groupW/2); label.setAttribute('y', h-14);
@@ -677,11 +910,19 @@
 
     var legend = document.getElementById('tendencia-legend');
     legend.innerHTML =
+      '<span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+colorIngreso+';"></i> Ingresos</span>' +
       '<span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+colorGasto+';"></i> Gastos</span>' +
       '<span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+colorPago+';"></i> Pagos a deudas</span>';
   }
 
   // ---- data ops ----
+  function addIngreso(i){
+    i.id = uid(); i.createdAt = Date.now();
+    state.ingresos.push(i); save(); renderAll();
+  }
+  function deleteIngreso(id){
+    state.ingresos = state.ingresos.filter(function(i){ return i.id!==id; }); save(); renderAll();
+  }
   function addGasto(g){
     g.id = uid(); g.createdAt = Date.now();
     state.gastos.push(g); save(); renderAll();
@@ -711,6 +952,38 @@
   }
 
   // ---- forms ----
+  document.getElementById('form-ingreso').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    var fecha = document.getElementById('i-fecha').value || todayISO();
+    var fuente = document.getElementById('i-fuente').value;
+    var monto = parseMoneyInput(document.getElementById('i-monto'));
+    var descripcion = document.getElementById('i-desc').value.trim();
+    if (!monto || monto<=0) return;
+    addIngreso({fecha:fecha, fuente:fuente, monto:monto, descripcion:descripcion});
+    ev.target.reset();
+    document.getElementById('i-fecha').value = todayISO();
+  });
+
+  document.getElementById('btn-toggle-ingreso-recurrente').addEventListener('click', function(){
+    var form = document.getElementById('form-ingreso-recurrente');
+    form.hidden = !form.hidden;
+  });
+  document.getElementById('form-ingreso-recurrente').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    var nombre = document.getElementById('ri-nombre').value.trim();
+    var fuente = document.getElementById('ri-fuente').value;
+    var monto = parseMoneyInput(document.getElementById('ri-monto'));
+    var dia = parseInt(document.getElementById('ri-dia').value, 10);
+    if (!nombre || !monto || monto<=0 || !dia || dia<1 || dia>28) return;
+    state.ingresosRecurrentes.push({id: uid(), nombre:nombre, fuente:fuente, monto:monto, dia:dia, createdAt: Date.now()});
+    save(); renderAll();
+    ev.target.reset();
+    document.getElementById('form-ingreso-recurrente').hidden = true;
+  });
+
+  document.getElementById('filter-mes-ingreso').addEventListener('change', renderIngresos);
+  document.getElementById('filter-fuente').addEventListener('change', renderIngresos);
+
   document.getElementById('form-gasto').addEventListener('submit', function(ev){
     ev.preventDefault();
     var fecha = document.getElementById('g-fecha').value || todayISO();
@@ -773,6 +1046,13 @@
   function buildWorkbook(){
     var wb = XLSX.utils.book_new();
 
+    var ingresosRows = [['Fecha','Fuente','Monto','Descripción','Recurrente']];
+    state.ingresos.slice().sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); })
+      .forEach(function(i){ ingresosRows.push([i.fecha||'', i.fuente||'', Number(i.monto)||0, i.descripcion||'', i.recurrenteId ? 'Sí' : 'No']); });
+    var wsIngresos = XLSX.utils.aoa_to_sheet(ingresosRows);
+    wsIngresos['!cols'] = [{wch:12},{wch:20},{wch:12},{wch:40},{wch:11}];
+    XLSX.utils.book_append_sheet(wb, wsIngresos, 'Ingresos');
+
     var gastosRows = [['Fecha','Categoría','Monto','Descripción','Recurrente']];
     state.gastos.slice().sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); })
       .forEach(function(g){ gastosRows.push([g.fecha||'', g.categoria||'', Number(g.monto)||0, g.descripcion||'', g.recurrenteId ? 'Sí' : 'No']); });
@@ -819,8 +1099,8 @@
       showBanner('No se pudo cargar el componente de Excel. Revisa tu conexión e intenta de nuevo.', true);
       return;
     }
-    if (!state.gastos.length && !state.deudas.length){
-      showBanner('Todavía no hay gastos ni deudas registradas para exportar.', true);
+    if (!state.ingresos.length && !state.gastos.length && !state.deudas.length){
+      showBanner('Todavía no hay datos registrados para exportar.', true);
       return;
     }
     try{
