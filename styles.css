@@ -168,6 +168,22 @@ button.small.cal svg{width:13px; height:13px;}
 .rec-tip.rec-info{background:var(--surface-2); color:var(--ink-soft);}
 .salud-card.no-data .salud-body{opacity:.85;}
 
+form.entry > p.hint{margin:0 0 10px; font-size:.82rem; color:var(--ink-soft);}
+
+.ahorro-capacidad{border-left:4px solid var(--line);}
+.ahorro-capacidad h3{margin-bottom:8px;}
+.ahorro-capacidad p{margin:0; font-size:.9rem; color:var(--ink-soft); line-height:1.5;}
+.ahorro-capacidad.good{border-left-color:var(--success);}
+.ahorro-capacidad.critical{border-left-color:var(--danger);}
+.ahorro-capacidad.info{border-left-color:var(--line);}
+.ahorro-breakdown{display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;}
+.ahorro-breakdown > div{
+  flex:1; min-width:110px; background:var(--surface-2); border-radius:10px; padding:10px 14px;
+  display:flex; flex-direction:column; gap:4px;
+}
+.ahorro-breakdown .label{font-size:.72rem; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em;}
+.ahorro-breakdown .mono{font-size:1.05rem; font-weight:600;}
+
 button.small.ghost.toggle-open{color:var(--accent);}
 
 li.rec-item{

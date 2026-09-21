@@ -48,6 +48,7 @@
     <button role="tab" aria-selected="false" data-tab="ingresos">Ingresos</button>
     <button role="tab" aria-selected="false" data-tab="gastos">Gastos</button>
     <button role="tab" aria-selected="false" data-tab="deudas">Deudas</button>
+    <button role="tab" aria-selected="false" data-tab="ahorro">Ahorro</button>
     <button role="tab" aria-selected="false" data-tab="progreso">Progreso</button>
   </nav>
 
@@ -115,18 +116,37 @@
     </div>
 
     <form class="entry" id="form-ingreso-recurrente" hidden>
+      <p class="hint">Cada trabajo puede pagar distinto — registra uno por cada frecuencia real.</p>
       <div class="row">
         <label>Nombre
-          <input type="text" id="ri-nombre" placeholder="Ej. Salario, Renta que cobro..." required>
+          <input type="text" id="ri-nombre" placeholder="Ej. Salario oficina, Freelance..." required>
         </label>
         <label>Fuente
           <select id="ri-fuente" required></select>
         </label>
-        <label>Monto
+        <label>Monto por pago
           <input type="text" id="ri-monto" placeholder="0.00" required>
         </label>
+        <label>Frecuencia de pago
+          <select id="ri-frecuencia" required></select>
+        </label>
+      </div>
+      <div class="row" id="ri-fields-mensual">
         <label>Día del mes
-          <input type="number" id="ri-dia" min="1" max="28" placeholder="1-28" required>
+          <input type="number" id="ri-dia" min="1" max="28" placeholder="1-28">
+        </label>
+      </div>
+      <div class="row" id="ri-fields-quincenal" hidden>
+        <label>Primer día de pago
+          <input type="number" id="ri-dia1" min="1" max="31" placeholder="Ej. 15" value="15">
+        </label>
+        <label>Segundo día de pago
+          <input type="number" id="ri-dia2" min="1" max="31" placeholder="Ej. 30 (o el último día)" value="30">
+        </label>
+      </div>
+      <div class="row" id="ri-fields-periodica" hidden>
+        <label>Fecha de un pago reciente
+          <input type="date" id="ri-fecha-inicio">
         </label>
       </div>
       <div class="actions-row"><button type="submit" class="primary">Guardar recurrente</button></div>
@@ -268,6 +288,38 @@
     </form>
 
     <div id="deudas-list"></div>
+  </section>
+
+  <section class="panel" id="panel-ahorro">
+    <div class="section-head">
+      <h2>Ahorro</h2>
+    </div>
+
+    <div class="chart-card ahorro-capacidad" id="ahorro-capacidad">
+      <h3 id="ahorro-capacidad-title">Capacidad de ahorro este mes</h3>
+      <div id="ahorro-capacidad-body"></div>
+    </div>
+
+    <div class="section-head" style="margin-top:26px;">
+      <h2>Metas de ahorro</h2>
+    </div>
+
+    <form class="entry" id="form-meta-ahorro">
+      <div class="row">
+        <label>Nombre de la meta
+          <input type="text" id="m-nombre" placeholder="Ej. Fondo de emergencia, Vacaciones..." required>
+        </label>
+        <label>Monto objetivo
+          <input type="text" id="m-monto" placeholder="0.00" required>
+        </label>
+        <label>Fecha meta (opcional)
+          <input type="date" id="m-fecha">
+        </label>
+      </div>
+      <div class="actions-row"><button type="submit" class="primary">Crear meta</button></div>
+    </form>
+
+    <div id="metas-ahorro-list"></div>
   </section>
 
   <section class="panel" id="panel-progreso">

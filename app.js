@@ -13,10 +13,17 @@
   ];
   var FRECUENCIA_LABEL = {unica:'Pago único', semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual'};
   var ESTADO_LABEL = {pagada:'Pagada', parcial:'Parcial', atrasada:'Atrasada', pendiente:'Pendiente'};
+  var INGRESO_FRECUENCIAS = [
+    {value:'semanal', label:'Semanal'},
+    {value:'catorcenal', label:'Catorcenal (cada 14 días)'},
+    {value:'quincenal', label:'Quincenal (2 veces al mes)'},
+    {value:'mensual', label:'Mensual'}
+  ];
+  var INGRESO_FREQ_LABEL = {semanal:'Semanal', catorcenal:'Catorcenal', quincenal:'Quincenal', mensual:'Mensual'};
   var STORAGE_KEY = "balance-app-data-v3";
   var LEGACY_KEYS = ["balance-app-data-v2", "balance-app-data-v1"];
 
-  var state = { ingresos: [], ingresosRecurrentes: [], gastos: [], deudas: [], recurrentes: [], remindersShown: {} };
+  var state = { ingresos: [], ingresosRecurrentes: [], gastos: [], deudas: [], recurrentes: [], metasAhorro: [], remindersShown: {} };
   var bannerTimer = null;
 
   var fmt = new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN', maximumFractionDigits:2});
@@ -32,6 +39,35 @@
   }
   function addDaysISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
   function addMonthsISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setMonth(d.getMonth()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+  function daysInMonth(mk){ var p=mk.split('-'); return new Date(parseInt(p[0],10), parseInt(p[1],10), 0).getDate(); }
+
+  // Occurrence dates of a recurring income within a given "YYYY-MM" month,
+  // supporting weekly / every-14-days / twice-a-month / once-a-month cadences —
+  // because different jobs pay on very different schedules.
+  function occurrencesInMonth(rec, mk){
+    var dim = daysInMonth(mk);
+    if (rec.frecuencia === 'mensual'){
+      return [mk+'-'+pad2(Math.min(rec.dia||1, dim))];
+    }
+    if (rec.frecuencia === 'quincenal'){
+      var out = [];
+      [rec.dia1||15, rec.dia2||dim].forEach(function(dd){
+        var iso = mk+'-'+pad2(Math.min(dd, dim));
+        if (out.indexOf(iso)===-1) out.push(iso);
+      });
+      return out.sort();
+    }
+    // semanal / catorcenal: anchored to a reference payday, repeating every 7 or 14 days
+    var step = rec.frecuencia === 'semanal' ? 7 : 14;
+    var anchor = rec.fechaInicio || (mk+'-01');
+    var monthStart = mk+'-01';
+    var diffDays = Math.round((new Date(monthStart+'T00:00:00') - new Date(anchor+'T00:00:00')) / 86400000);
+    var mod = ((diffDays % step) + step) % step;
+    var cursor = mod===0 ? monthStart : addDaysISO(monthStart, step-mod);
+    var res = [];
+    while (cursor.slice(0,7) === mk){ res.push(cursor); cursor = addDaysISO(cursor, step); }
+    return res;
+  }
 
   // ---- installment schedule (cuotas) ----
   // Builds the expected payment schedule for a debt: one lump sum for "unica",
@@ -123,7 +159,7 @@
   }
 
   function migrate(parsed){
-    var data = { ingresos: parsed.ingresos||[], ingresosRecurrentes: parsed.ingresosRecurrentes||[], gastos: parsed.gastos||[], deudas: parsed.deudas||[], recurrentes: parsed.recurrentes||[], remindersShown: parsed.remindersShown||{} };
+    var data = { ingresos: parsed.ingresos||[], ingresosRecurrentes: parsed.ingresosRecurrentes||[], gastos: parsed.gastos||[], deudas: parsed.deudas||[], recurrentes: parsed.recurrentes||[], metasAhorro: parsed.metasAhorro||[], remindersShown: parsed.remindersShown||{} };
     data.deudas.forEach(function(d){
       if (!d.pagos){
         d.pagos = [];
@@ -138,6 +174,12 @@
       delete d.fechaLimite;
       if (d.montoCuota == null) d.montoCuota = (d.frecuencia === 'unica') ? Number(d.montoTotal||0) : 0;
       if (d.numCuotas == null) d.numCuotas = null;
+    });
+    data.ingresosRecurrentes.forEach(function(r){
+      if (!r.frecuencia) r.frecuencia = 'mensual'; // older entries only had "día del mes"
+    });
+    data.metasAhorro.forEach(function(m){
+      if (!m.aportes) m.aportes = [];
     });
     return data;
   }
@@ -204,7 +246,7 @@
 
   [document.getElementById('g-monto'), document.getElementById('d-total'), document.getElementById('d-pagado'),
    document.getElementById('r-monto'), document.getElementById('d-monto-cuota'),
-   document.getElementById('i-monto'), document.getElementById('ri-monto')]
+   document.getElementById('i-monto'), document.getElementById('ri-monto'), document.getElementById('m-monto')]
     .forEach(function(el){ if (el) attachMoneyInput(el); });
 
   function updateCuotaFieldsVisibility(){
@@ -261,6 +303,7 @@
     renderDeudas();
     renderResumen();
     renderProgreso();
+    renderAhorro();
   }
 
   function renderIngresosRecurrentes(){
@@ -268,18 +311,30 @@
     var list = document.getElementById('ingresos-recurrentes-list');
     list.innerHTML = '';
     if (!state.ingresosRecurrentes.length){
-      var e = document.createElement('li'); e.className='empty'; e.textContent='No tienes ingresos recurrentes todavía. Agrega tu salario, mesada, renta que cobras...';
+      var e = document.createElement('li'); e.className='empty'; e.textContent='No tienes ingresos recurrentes todavía. Agrega tu salario, mesada, renta que cobras — cada trabajo puede tener su propia frecuencia de pago.';
       list.appendChild(e); return;
     }
-    state.ingresosRecurrentes.slice().sort(function(a,b){ return (a.dia||0)-(b.dia||0); }).forEach(function(r){
-      var linked = state.ingresos.find(function(i){ return i.recurrenteId===r.id && monthKey(i.fecha)===mes; });
+    var rows = [];
+    state.ingresosRecurrentes.forEach(function(r){
+      occurrencesInMonth(r, mes).forEach(function(fecha){ rows.push({r:r, fecha:fecha}); });
+    });
+    rows.sort(function(a,b){ return a.fecha.localeCompare(b.fecha); });
+
+    if (!rows.length){
+      var e2 = document.createElement('li'); e2.className='empty'; e2.textContent='No hay pagos programados este mes para tus ingresos recurrentes.';
+      list.appendChild(e2); return;
+    }
+
+    rows.forEach(function(row){
+      var r = row.r, fecha = row.fecha;
+      var linked = state.ingresos.find(function(i){ return i.recurrenteId===r.id && i.fecha===fecha; });
       var li = document.createElement('li'); li.className = 'rec-item' + (linked ? ' checked':'');
       var box = document.createElement('span'); box.className='checkbox';
       box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
-      box.addEventListener('click', function(){ toggleIngresoRecurrente(r, linked); });
+      box.addEventListener('click', function(){ toggleIngresoRecurrente(r, fecha, linked); });
       var main = document.createElement('div'); main.className='main';
       var desc = document.createElement('div'); desc.className='desc'; desc.textContent = r.nombre;
-      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = r.fuente + ' · día ' + r.dia + ' de cada mes';
+      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = r.fuente + ' · ' + INGRESO_FREQ_LABEL[r.frecuencia] + ' · ' + formatDate(fecha);
       main.appendChild(desc); main.appendChild(meta);
       var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(r.monto);
       var del = document.createElement('button'); del.className='del'; del.setAttribute('aria-label','Eliminar recurrente'); del.textContent='✕';
@@ -289,11 +344,11 @@
     });
   }
 
-  function toggleIngresoRecurrente(r, existingIngreso){
+  function toggleIngresoRecurrente(r, fecha, existingIngreso){
     if (existingIngreso){
       deleteIngreso(existingIngreso.id);
     } else {
-      addIngreso({fecha: todayISO(), fuente: r.fuente, monto: r.monto, descripcion: r.nombre, recurrenteId: r.id});
+      addIngreso({fecha: fecha, fuente: r.fuente, monto: r.monto, descripcion: r.nombre, recurrenteId: r.id});
     }
   }
 
@@ -915,6 +970,113 @@
       '<span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+colorPago+';"></i> Pagos a deudas</span>';
   }
 
+  // ---- ahorro (savings capacity + goals) ----
+  function aportadoAhorro(m){
+    return (m.aportes||[]).reduce(function(s,a){ return s + (Number(a.monto)||0); }, 0);
+  }
+
+  function renderAhorro(){
+    var mes = todayISO().slice(0,7);
+    var ingresoMes = state.ingresos.filter(function(i){ return monthKey(i.fecha)===mes; })
+      .reduce(function(s,i){ return s+Number(i.monto||0); }, 0);
+    var gastoMes = state.gastos.filter(function(g){ return monthKey(g.fecha)===mes; })
+      .reduce(function(s,g){ return s+Number(g.monto||0); }, 0);
+    var pagoMes = 0;
+    state.deudas.forEach(function(d){ (d.pagos||[]).forEach(function(p){ if (monthKey(p.fecha)===mes) pagoMes += Number(p.monto||0); }); });
+
+    var disponible = ingresoMes - gastoMes - pagoMes;
+    var card = document.getElementById('ahorro-capacidad');
+    var title = document.getElementById('ahorro-capacidad-title');
+    var body = document.getElementById('ahorro-capacidad-body');
+
+    if (ingresoMes <= 0){
+      card.className = 'chart-card ahorro-capacidad info';
+      title.textContent = 'Sin datos suficientes';
+      body.innerHTML = '<p>Agrega tus ingresos del mes para calcular cuánto podrías ahorrar.</p>';
+    } else if (disponible <= 0){
+      card.className = 'chart-card ahorro-capacidad critical';
+      title.textContent = 'No es posible ahorrar este mes';
+      body.innerHTML = '<p>Tus gastos y pagos de deuda (' + money(gastoMes+pagoMes) + ') superan tus ingresos (' + money(ingresoMes) + ') por <strong>' + money(Math.abs(disponible)) + '</strong>. Antes de ahorrar, revisa tus categorías de gasto más altas o renegocia pagos de deuda.</p>';
+    } else {
+      var sugerido = disponible * 0.8;
+      card.className = 'chart-card ahorro-capacidad good';
+      title.textContent = 'Podrías ahorrar ' + money(disponible) + ' este mes';
+      body.innerHTML =
+        '<p>Te sugerimos apartar <strong>' + money(sugerido) + '</strong> (80% del excedente) y dejar el resto como colchón para imprevistos.</p>' +
+        '<div class="ahorro-breakdown">' +
+          '<div><span class="label">Al mes</span><span class="mono">' + money(sugerido) + '</span></div>' +
+          '<div><span class="label">A la semana</span><span class="mono">' + money(sugerido/4.345) + '</span></div>' +
+          '<div><span class="label">Al día</span><span class="mono">' + money(sugerido/30) + '</span></div>' +
+        '</div>';
+    }
+
+    var wrap = document.getElementById('metas-ahorro-list');
+    wrap.innerHTML = '';
+    if (!state.metasAhorro.length){
+      wrap.innerHTML = '<div class="empty">Crea una meta — vacaciones, fondo de emergencia, un enganche — y registra tus aportes para ver tu avance.</div>';
+      return;
+    }
+    state.metasAhorro.slice().sort(function(a,b){ return (a.fechaObjetivo||'9999').localeCompare(b.fechaObjetivo||'9999'); }).forEach(function(m){
+      var total = Number(m.montoObjetivo||0), aportado = aportadoAhorro(m);
+      var pct = total>0 ? Math.min(100, (aportado/total)*100) : 0;
+      var done = pct >= 100;
+
+      var card2 = document.createElement('div'); card2.className = 'debt-card' + (done?' done':'');
+      var head = document.createElement('div'); head.className='head';
+      var name = document.createElement('div'); name.className='name'; name.textContent = m.nombre;
+      var due = document.createElement('div'); due.className='due'; due.textContent = m.fechaObjetivo ? ('Meta ' + formatDate(m.fechaObjetivo)) : 'Sin fecha meta';
+      head.appendChild(name); head.appendChild(due);
+
+      var figures = document.createElement('div'); figures.className='figures';
+      var left = document.createElement('span'); left.innerHTML = '<span class="paid mono">'+money(aportado)+'</span> de <span class="mono">'+money(total)+'</span>';
+      var right = document.createElement('span'); right.className='mono'; right.textContent = done ? '¡Meta cumplida!' : (money(Math.max(0,total-aportado)) + ' restante');
+      figures.appendChild(left); figures.appendChild(right);
+
+      var track = document.createElement('div'); track.className='bar-track';
+      var fill = document.createElement('div'); fill.className='bar-fill'; fill.style.width = pct+'%';
+      if (done) fill.style.background = 'var(--success)';
+      track.appendChild(fill);
+
+      var foot = document.createElement('div'); foot.className='foot';
+      var actions = document.createElement('div'); actions.className='debt-actions';
+      if (!done){
+        var input = document.createElement('input'); input.type='text'; input.placeholder='Aporte';
+        attachMoneyInput(input);
+        var addBtn = document.createElement('button'); addBtn.className='small'; addBtn.textContent='Aportar';
+        addBtn.addEventListener('click', function(){
+          var v = parseMoneyInput(input);
+          if (!v || v<=0) return;
+          addAporteAhorro(m.id, Math.min(v, Math.max(0,total-aportado)));
+          input.value='';
+        });
+        actions.appendChild(input); actions.appendChild(addBtn);
+      }
+      var delBtn = document.createElement('button'); delBtn.className='small ghost'; delBtn.textContent='Eliminar';
+      delBtn.addEventListener('click', function(){ deleteMetaAhorro(m.id); });
+      actions.appendChild(delBtn);
+      foot.appendChild(document.createElement('span'));
+      foot.appendChild(actions);
+
+      card2.appendChild(head); card2.appendChild(figures); card2.appendChild(track); card2.appendChild(foot);
+      wrap.appendChild(card2);
+    });
+  }
+
+  function addMetaAhorro(m){
+    m.id = uid(); m.createdAt = Date.now(); m.aportes = [];
+    state.metasAhorro.push(m); save(); renderAll();
+  }
+  function deleteMetaAhorro(id){
+    state.metasAhorro = state.metasAhorro.filter(function(m){ return m.id!==id; }); save(); renderAll();
+  }
+  function addAporteAhorro(id, monto){
+    var m = state.metasAhorro.find(function(x){ return x.id===id; });
+    if (!m) return;
+    m.aportes = m.aportes||[];
+    m.aportes.push({id: uid(), fecha: todayISO(), monto: monto});
+    save(); renderAll();
+  }
+
   // ---- data ops ----
   function addIngreso(i){
     i.id = uid(); i.createdAt = Date.now();
@@ -968,21 +1130,57 @@
     var form = document.getElementById('form-ingreso-recurrente');
     form.hidden = !form.hidden;
   });
+  function updateIngresoFreqFieldsVisibility(){
+    var freq = document.getElementById('ri-frecuencia').value;
+    document.getElementById('ri-fields-mensual').hidden = (freq !== 'mensual');
+    document.getElementById('ri-fields-quincenal').hidden = (freq !== 'quincenal');
+    document.getElementById('ri-fields-periodica').hidden = (freq !== 'semanal' && freq !== 'catorcenal');
+  }
+  var riFreqSel = document.getElementById('ri-frecuencia');
+  INGRESO_FRECUENCIAS.forEach(function(f){ var o=document.createElement('option'); o.value=f.value; o.textContent=f.label; riFreqSel.appendChild(o); });
+  riFreqSel.addEventListener('change', updateIngresoFreqFieldsVisibility);
+  updateIngresoFreqFieldsVisibility();
+
   document.getElementById('form-ingreso-recurrente').addEventListener('submit', function(ev){
     ev.preventDefault();
     var nombre = document.getElementById('ri-nombre').value.trim();
     var fuente = document.getElementById('ri-fuente').value;
     var monto = parseMoneyInput(document.getElementById('ri-monto'));
-    var dia = parseInt(document.getElementById('ri-dia').value, 10);
-    if (!nombre || !monto || monto<=0 || !dia || dia<1 || dia>28) return;
-    state.ingresosRecurrentes.push({id: uid(), nombre:nombre, fuente:fuente, monto:monto, dia:dia, createdAt: Date.now()});
+    var frecuencia = document.getElementById('ri-frecuencia').value;
+    if (!nombre || !monto || monto<=0) return;
+    var nuevo = {id: uid(), nombre:nombre, fuente:fuente, monto:monto, frecuencia:frecuencia, createdAt: Date.now()};
+    if (frecuencia === 'mensual'){
+      var dia = parseInt(document.getElementById('ri-dia').value, 10);
+      if (!dia || dia<1 || dia>28) { showBanner('Ingresa un día del mes válido (1-28).', true); return; }
+      nuevo.dia = dia;
+    } else if (frecuencia === 'quincenal'){
+      var dia1 = parseInt(document.getElementById('ri-dia1').value, 10) || 15;
+      var dia2 = parseInt(document.getElementById('ri-dia2').value, 10) || 30;
+      nuevo.dia1 = dia1; nuevo.dia2 = dia2;
+    } else {
+      var fi = document.getElementById('ri-fecha-inicio').value;
+      if (!fi){ showBanner('Ingresa la fecha de un pago reciente para calcular las siguientes fechas.', true); return; }
+      nuevo.fechaInicio = fi;
+    }
+    state.ingresosRecurrentes.push(nuevo);
     save(); renderAll();
     ev.target.reset();
+    updateIngresoFreqFieldsVisibility();
     document.getElementById('form-ingreso-recurrente').hidden = true;
   });
 
   document.getElementById('filter-mes-ingreso').addEventListener('change', renderIngresos);
   document.getElementById('filter-fuente').addEventListener('change', renderIngresos);
+
+  document.getElementById('form-meta-ahorro').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    var nombre = document.getElementById('m-nombre').value.trim();
+    var montoObjetivo = parseMoneyInput(document.getElementById('m-monto'));
+    var fechaObjetivo = document.getElementById('m-fecha').value || '';
+    if (!nombre || !montoObjetivo || montoObjetivo<=0) return;
+    addMetaAhorro({nombre:nombre, montoObjetivo:montoObjetivo, fechaObjetivo:fechaObjetivo});
+    ev.target.reset();
+  });
 
   document.getElementById('form-gasto').addEventListener('submit', function(ev){
     ev.preventDefault();
@@ -1089,6 +1287,22 @@
     var wsCuotas = XLSX.utils.aoa_to_sheet(cuotasRows);
     wsCuotas['!cols'] = [{wch:22},{wch:9},{wch:14},{wch:14},{wch:12},{wch:11}];
     XLSX.utils.book_append_sheet(wb, wsCuotas, 'Calendario de cuotas');
+
+    var ahorroRows = [['Meta','Fecha objetivo','Monto objetivo','Aportado','Restante','Fecha de aporte','Monto de aporte']];
+    state.metasAhorro.forEach(function(m){
+      var total = Number(m.montoObjetivo)||0, aportado = aportadoAhorro(m);
+      var aportes = (m.aportes||[]).slice().sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); });
+      if (!aportes.length){
+        ahorroRows.push([m.nombre||'', m.fechaObjetivo||'', total, aportado, Math.max(0,total-aportado), '', '']);
+      } else {
+        aportes.forEach(function(a, idx){
+          ahorroRows.push([idx===0?(m.nombre||''):'', idx===0?(m.fechaObjetivo||''):'', idx===0?total:'', idx===0?aportado:'', idx===0?Math.max(0,total-aportado):'', a.fecha||'', Number(a.monto)||0]);
+        });
+      }
+    });
+    var wsAhorro = XLSX.utils.aoa_to_sheet(ahorroRows);
+    wsAhorro['!cols'] = [{wch:20},{wch:14},{wch:14},{wch:12},{wch:12},{wch:14},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, wsAhorro, 'Metas de ahorro');
 
     return wb;
   }
