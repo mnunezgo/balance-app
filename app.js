@@ -20,6 +20,21 @@
     {value:'mensual', label:'Mensual'}
   ];
   var INGRESO_FREQ_LABEL = {semanal:'Semanal', catorcenal:'Catorcenal', quincenal:'Quincenal', mensual:'Mensual'};
+  var GASTO_FRECUENCIAS = [
+    {value:'semanal', label:'Semanal'},
+    {value:'mensual', label:'Mensual'},
+    {value:'anual', label:'Anual'}
+  ];
+  var GASTO_FREQ_LABEL = {semanal:'Semanal', mensual:'Mensual', anual:'Anual'};
+  var SUBCATS = {
+    "Servicios": ["Luz","Agua","Gas","Internet","Teléfono","Cable/TV","Otro"],
+    "Comida": ["Supermercado","Restaurante","Café","Comida rápida","Otro"],
+    "Transporte": ["Gasolina","Uber/Taxi","Transporte público","Mantenimiento","Estacionamiento","Otro"],
+    "Vivienda": ["Renta/Hipoteca","Mantenimiento","Mobiliario","Predial","Otro"],
+    "Entretenimiento": ["Streaming","Cine","Salidas","Videojuegos","Otro"],
+    "Salud": ["Consulta médica","Medicamentos","Seguro médico","Otro"],
+    "Educación": ["Colegiatura","Libros/Material","Cursos","Otro"]
+  };
   var STORAGE_KEY = "balance-app-data-v3";
   var LEGACY_KEYS = ["balance-app-data-v2", "balance-app-data-v1"];
 
@@ -41,13 +56,18 @@
   function addMonthsISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setMonth(d.getMonth()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
   function daysInMonth(mk){ var p=mk.split('-'); return new Date(parseInt(p[0],10), parseInt(p[1],10), 0).getDate(); }
 
-  // Occurrence dates of a recurring income within a given "YYYY-MM" month,
-  // supporting weekly / every-14-days / twice-a-month / once-a-month cadences —
-  // because different jobs pay on very different schedules.
+  // Occurrence dates of a recurring income/expense within a given "YYYY-MM" month,
+  // supporting weekly / every-14-days / twice-a-month / once-a-month / once-a-year
+  // cadences — different jobs pay, and different bills fall due, on very different schedules.
   function occurrencesInMonth(rec, mk){
     var dim = daysInMonth(mk);
     if (rec.frecuencia === 'mensual'){
       return [mk+'-'+pad2(Math.min(rec.dia||1, dim))];
+    }
+    if (rec.frecuencia === 'anual'){
+      if (!rec.fechaInicio) return [];
+      if (rec.fechaInicio.slice(5,7) !== mk.slice(5,7)) return [];
+      return [mk+'-'+pad2(Math.min(parseInt(rec.fechaInicio.slice(8,10),10), dim))];
     }
     if (rec.frecuencia === 'quincenal'){
       var out = [];
@@ -178,6 +198,9 @@
     data.ingresosRecurrentes.forEach(function(r){
       if (!r.frecuencia) r.frecuencia = 'mensual'; // older entries only had "día del mes"
     });
+    data.recurrentes.forEach(function(r){
+      if (!r.frecuencia) r.frecuencia = 'mensual'; // older entries only had "día del mes"
+    });
     data.metasAhorro.forEach(function(m){
       if (!m.aportes) m.aportes = [];
     });
@@ -230,12 +253,35 @@
     }
     FUENTES.forEach(function(f){ var o=document.createElement('option'); o.value=f; o.textContent=f; sel.appendChild(o); });
   }
+  // When a category has known sub-types (Servicios -> Luz/Agua/Gas...), show a second
+  // dropdown automatically instead of making the person type it out each time.
+  function wireSubcategory(catSelId, subSelId, subFieldId){
+    var catSel = document.getElementById(catSelId);
+    var subSel = document.getElementById(subSelId);
+    var subField = document.getElementById(subFieldId);
+    function update(){
+      var subs = SUBCATS[catSel.value];
+      subSel.innerHTML = '';
+      if (!subs || !subs.length){
+        subField.hidden = true;
+        return;
+      }
+      var blank = document.createElement('option'); blank.value=''; blank.textContent='Selecciona (opcional)';
+      subSel.appendChild(blank);
+      subs.forEach(function(s){ var o=document.createElement('option'); o.value=s; o.textContent=s; subSel.appendChild(o); });
+      subField.hidden = false;
+    }
+    catSel.addEventListener('change', update);
+    update();
+  }
   fillCategorySelect(document.getElementById('g-categoria'), false);
   fillCategorySelect(document.getElementById('filter-cat'), true);
   fillCategorySelect(document.getElementById('r-categoria'), false);
   fillFuenteSelect(document.getElementById('i-fuente'), false);
   fillFuenteSelect(document.getElementById('filter-fuente'), true);
   fillFuenteSelect(document.getElementById('ri-fuente'), false);
+  wireSubcategory('g-categoria', 'g-subcategoria', 'g-subcategoria-field');
+  wireSubcategory('r-categoria', 'r-subcategoria', 'r-subcategoria-field');
   document.getElementById('g-fecha').value = todayISO();
   document.getElementById('i-fecha').value = todayISO();
 
@@ -440,15 +486,28 @@
       var e = document.createElement('li'); e.className='empty'; e.textContent='No tienes pagos recurrentes todavía. Agrega renta, suscripciones, servicios...';
       list.appendChild(e); return;
     }
-    state.recurrentes.slice().sort(function(a,b){ return (a.dia||0)-(b.dia||0); }).forEach(function(r){
-      var linked = state.gastos.find(function(g){ return g.recurrenteId===r.id && monthKey(g.fecha)===mes; });
+    var rows = [];
+    state.recurrentes.forEach(function(r){
+      occurrencesInMonth(r, mes).forEach(function(fecha){ rows.push({r:r, fecha:fecha}); });
+    });
+    rows.sort(function(a,b){ return a.fecha.localeCompare(b.fecha); });
+
+    if (!rows.length){
+      var e2 = document.createElement('li'); e2.className='empty'; e2.textContent='No hay pagos recurrentes programados este mes.';
+      list.appendChild(e2); return;
+    }
+
+    rows.forEach(function(row){
+      var r = row.r, fecha = row.fecha;
+      var linked = state.gastos.find(function(g){ return g.recurrenteId===r.id && g.fecha===fecha; });
       var li = document.createElement('li'); li.className = 'rec-item' + (linked ? ' checked':'');
       var box = document.createElement('span'); box.className='checkbox';
       box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
-      box.addEventListener('click', function(){ toggleRecurrente(r, linked); });
+      box.addEventListener('click', function(){ toggleRecurrente(r, fecha, linked); });
       var main = document.createElement('div'); main.className='main';
       var desc = document.createElement('div'); desc.className='desc'; desc.textContent = r.nombre;
-      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = r.categoria + ' · día ' + r.dia + ' de cada mes';
+      var catLabel = r.categoria + (r.subcategoria ? ' · '+r.subcategoria : '');
+      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = catLabel + ' · ' + GASTO_FREQ_LABEL[r.frecuencia||'mensual'] + ' · ' + formatDate(fecha);
       main.appendChild(desc); main.appendChild(meta);
       var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(r.monto);
       var del = document.createElement('button'); del.className='del'; del.setAttribute('aria-label','Eliminar recurrente'); del.textContent='✕';
@@ -458,11 +517,11 @@
     });
   }
 
-  function toggleRecurrente(r, existingGasto){
+  function toggleRecurrente(r, fecha, existingGasto){
     if (existingGasto){
       deleteGasto(existingGasto.id);
     } else {
-      addGasto({fecha: todayISO(), categoria: r.categoria, monto: r.monto, descripcion: r.nombre, recurrenteId: r.id});
+      addGasto({fecha: fecha, categoria: r.categoria, subcategoria: r.subcategoria||'', monto: r.monto, descripcion: r.nombre, recurrenteId: r.id});
     }
   }
 
@@ -490,8 +549,9 @@
       var li = document.createElement('li'); li.className='item';
       var dot = document.createElement('span'); dot.className='dot'; dot.style.background = CAT_COLOR[g.categoria]||'var(--cat-8)';
       var main = document.createElement('div'); main.className='main';
-      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = g.descripcion ? g.descripcion : g.categoria;
-      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = g.categoria + ' · ' + formatDate(g.fecha) + (g.recurrenteId ? ' · recurrente' : '');
+      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = g.descripcion ? g.descripcion : (g.subcategoria || g.categoria);
+      var catLabel = g.categoria + (g.subcategoria ? ' · '+g.subcategoria : '');
+      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = catLabel + ' · ' + formatDate(g.fecha) + (g.recurrenteId ? ' · recurrente' : '');
       main.appendChild(desc); main.appendChild(meta);
       var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(g.monto);
       var del = document.createElement('button'); del.className='del'; del.setAttribute('aria-label','Eliminar gasto'); del.textContent='✕';
@@ -1265,12 +1325,14 @@
     ev.preventDefault();
     var fecha = document.getElementById('g-fecha').value || todayISO();
     var categoria = document.getElementById('g-categoria').value;
+    var subcategoria = document.getElementById('g-subcategoria').value;
     var monto = parseMoneyInput(document.getElementById('g-monto'));
     var descripcion = document.getElementById('g-desc').value.trim();
     if (!monto || monto<=0) return;
-    addGasto({fecha:fecha, categoria:categoria, monto:monto, descripcion:descripcion});
+    addGasto({fecha:fecha, categoria:categoria, subcategoria:subcategoria, monto:monto, descripcion:descripcion});
     ev.target.reset();
     document.getElementById('g-fecha').value = todayISO();
+    document.getElementById('g-categoria').dispatchEvent(new Event('change'));
   });
 
   document.getElementById('form-deuda').addEventListener('submit', function(ev){
@@ -1302,16 +1364,42 @@
     var form = document.getElementById('form-recurrente');
     form.hidden = !form.hidden;
   });
+
+  function updateGastoFreqFieldsVisibility(){
+    var freq = document.getElementById('r-frecuencia').value;
+    document.getElementById('r-fields-mensual').hidden = (freq !== 'mensual');
+    document.getElementById('r-fields-periodica').hidden = (freq === 'mensual');
+    document.getElementById('r-fecha-label').textContent = (freq === 'anual') ? 'Fecha del cargo (cualquier año)' : 'Fecha de un pago reciente';
+  }
+  var rFreqSel = document.getElementById('r-frecuencia');
+  GASTO_FRECUENCIAS.forEach(function(f){ var o=document.createElement('option'); o.value=f.value; o.textContent=f.label; rFreqSel.appendChild(o); });
+  rFreqSel.value = 'mensual';
+  rFreqSel.addEventListener('change', updateGastoFreqFieldsVisibility);
+  updateGastoFreqFieldsVisibility();
+
   document.getElementById('form-recurrente').addEventListener('submit', function(ev){
     ev.preventDefault();
     var nombre = document.getElementById('r-nombre').value.trim();
     var categoria = document.getElementById('r-categoria').value;
+    var subcategoria = document.getElementById('r-subcategoria').value;
     var monto = parseMoneyInput(document.getElementById('r-monto'));
-    var dia = parseInt(document.getElementById('r-dia').value, 10);
-    if (!nombre || !monto || monto<=0 || !dia || dia<1 || dia>28) return;
-    state.recurrentes.push({id: uid(), nombre:nombre, categoria:categoria, monto:monto, dia:dia, createdAt: Date.now()});
+    var frecuencia = document.getElementById('r-frecuencia').value;
+    if (!nombre || !monto || monto<=0) return;
+    var nuevo = {id: uid(), nombre:nombre, categoria:categoria, subcategoria:subcategoria, monto:monto, frecuencia:frecuencia, createdAt: Date.now()};
+    if (frecuencia === 'mensual'){
+      var dia = parseInt(document.getElementById('r-dia').value, 10);
+      if (!dia || dia<1 || dia>28){ showBanner('Ingresa un día del mes válido (1-28).', true); return; }
+      nuevo.dia = dia;
+    } else {
+      var fi = document.getElementById('r-fecha-inicio').value;
+      if (!fi){ showBanner('Ingresa una fecha de referencia para calcular las siguientes fechas.', true); return; }
+      nuevo.fechaInicio = fi;
+    }
+    state.recurrentes.push(nuevo);
     save(); renderAll();
     ev.target.reset();
+    rFreqSel.value = 'mensual';
+    updateGastoFreqFieldsVisibility();
     document.getElementById('form-recurrente').hidden = true;
   });
 
@@ -1330,11 +1418,11 @@
     wsIngresos['!cols'] = [{wch:12},{wch:20},{wch:12},{wch:40},{wch:11}];
     XLSX.utils.book_append_sheet(wb, wsIngresos, 'Ingresos');
 
-    var gastosRows = [['Fecha','Categoría','Monto','Descripción','Recurrente']];
+    var gastosRows = [['Fecha','Categoría','Subcategoría','Monto','Descripción','Recurrente']];
     state.gastos.slice().sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); })
-      .forEach(function(g){ gastosRows.push([g.fecha||'', g.categoria||'', Number(g.monto)||0, g.descripcion||'', g.recurrenteId ? 'Sí' : 'No']); });
+      .forEach(function(g){ gastosRows.push([g.fecha||'', g.categoria||'', g.subcategoria||'', Number(g.monto)||0, g.descripcion||'', g.recurrenteId ? 'Sí' : 'No']); });
     var wsGastos = XLSX.utils.aoa_to_sheet(gastosRows);
-    wsGastos['!cols'] = [{wch:12},{wch:16},{wch:12},{wch:40},{wch:11}];
+    wsGastos['!cols'] = [{wch:12},{wch:16},{wch:16},{wch:12},{wch:40},{wch:11}];
     XLSX.utils.book_append_sheet(wb, wsGastos, 'Gastos');
 
     var deudasRows = [['Entidad','Tipo','Frecuencia','Monto total','Pagado','Restante','Próximo vencimiento','Estado','Notas']];

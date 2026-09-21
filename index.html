@@ -192,16 +192,29 @@
     <form class="entry" id="form-recurrente" hidden>
       <div class="row">
         <label>Nombre
-          <input type="text" id="r-nombre" placeholder="Ej. Renta, Netflix, Gimnasio..." required>
+          <input type="text" id="r-nombre" placeholder="Ej. Renta, Netflix, Seguro del auto..." required>
         </label>
         <label>Categoría
           <select id="r-categoria" required></select>
         </label>
+        <label id="r-subcategoria-field" hidden>Tipo
+          <select id="r-subcategoria"></select>
+        </label>
         <label>Monto
           <input type="text" id="r-monto" placeholder="0.00" required>
         </label>
+        <label>Frecuencia
+          <select id="r-frecuencia" required></select>
+        </label>
+      </div>
+      <div class="row" id="r-fields-mensual">
         <label>Día del mes
-          <input type="number" id="r-dia" min="1" max="28" placeholder="1-28" required>
+          <input type="number" id="r-dia" min="1" max="28" placeholder="1-28">
+        </label>
+      </div>
+      <div class="row" id="r-fields-periodica" hidden>
+        <label><span id="r-fecha-label">Fecha de un pago reciente</span>
+          <input type="date" id="r-fecha-inicio">
         </label>
       </div>
       <div class="actions-row"><button type="submit" class="primary">Guardar recurrente</button></div>
@@ -244,6 +257,9 @@
         </label>
         <label>Categoría
           <select id="g-categoria" required></select>
+        </label>
+        <label id="g-subcategoria-field" hidden>Tipo
+          <select id="g-subcategoria"></select>
         </label>
         <label>Monto
           <input type="text" id="g-monto" placeholder="0.00" required>
