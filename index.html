@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Balance — Gastos y Deudas</title>
-<meta name="description" content="Registra tus gastos por categoría y da seguimiento a tus deudas.">
+<meta name="description" content="Registra tus gastos por categoría, haz seguimiento de cada pago de tus deudas y mira tu progreso mes a mes.">
 <meta name="theme-color" content="#2B6F68">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -19,7 +19,7 @@
 <body>
 
 <div class="wrap">
-  <h2 class="sr-only">Balance: aplicación personal para registrar gastos y deudas, con resumen de totales, lista filtrable de gastos por categoría y seguimiento de pagos de deudas.</h2>
+  <h2 class="sr-only">Balance: aplicación personal para registrar gastos y deudas, con pagos recurrentes, historial de pagos por deuda, tendencia mensual, recordatorios y exportación a Excel.</h2>
 
   <header class="top">
     <div class="title-group">
@@ -27,6 +27,9 @@
       <span class="tag">Gastos y deudas, todo en un lugar</span>
     </div>
     <div class="header-actions">
+      <button type="button" class="icon-btn" id="btn-notify" title="Activar notificaciones" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      </button>
       <button type="button" class="install" id="btn-install" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M6 10l6 6 6-6"/><path d="M4 20h16"/></svg>
         Instalar app
@@ -44,6 +47,7 @@
     <button role="tab" aria-selected="true" data-tab="resumen">Resumen</button>
     <button role="tab" aria-selected="false" data-tab="gastos">Gastos</button>
     <button role="tab" aria-selected="false" data-tab="deudas">Deudas</button>
+    <button role="tab" aria-selected="false" data-tab="progreso">Progreso</button>
   </nav>
 
   <section class="panel active" id="panel-resumen">
@@ -52,6 +56,10 @@
         <div class="label">Gastado este mes</div>
         <div class="value mono" id="sum-gastos-mes">$0</div>
       </div>
+      <div class="card pos">
+        <div class="label">Pagado a deudas este mes</div>
+        <div class="value mono" id="sum-pagado-mes">$0</div>
+      </div>
       <div class="card neg">
         <div class="label">Deuda pendiente</div>
         <div class="value mono" id="sum-deuda-pendiente">$0</div>
@@ -59,6 +67,16 @@
       <div class="card" id="card-balance">
         <div class="label">Comprometido total (mes + deudas)</div>
         <div class="value mono" id="sum-total">$0</div>
+      </div>
+    </div>
+
+    <div class="chart-card" id="notify-card" hidden>
+      <div class="notify-row">
+        <div>
+          <h3>Recordatorios</h3>
+          <p class="hint">Activa las notificaciones para avisos cuando abras la app, y agrega tus deudas y pagos recurrentes al calendario de tu celular para recordatorios reales aunque la app esté cerrada.</p>
+        </div>
+        <button type="button" class="primary" id="btn-notify-inline">Activar notificaciones</button>
       </div>
     </div>
 
@@ -76,6 +94,31 @@
 
   <section class="panel" id="panel-gastos">
     <div class="section-head">
+      <h2>Pagos recurrentes de este mes</h2>
+      <button type="button" class="small" id="btn-toggle-recurrente">+ Agregar recurrente</button>
+    </div>
+
+    <form class="entry" id="form-recurrente" hidden>
+      <div class="row">
+        <label>Nombre
+          <input type="text" id="r-nombre" placeholder="Ej. Renta, Netflix, Gimnasio..." required>
+        </label>
+        <label>Categoría
+          <select id="r-categoria" required></select>
+        </label>
+        <label>Monto
+          <input type="number" id="r-monto" min="0" step="0.01" placeholder="0.00" required>
+        </label>
+        <label>Día del mes
+          <input type="number" id="r-dia" min="1" max="28" placeholder="1-28" required>
+        </label>
+      </div>
+      <div class="actions-row"><button type="submit" class="primary">Guardar recurrente</button></div>
+    </form>
+
+    <ul class="list" id="recurrentes-list"></ul>
+
+    <div class="section-head" style="margin-top:26px;">
       <h2>Gastos</h2>
       <div class="filters">
         <select id="filter-mes"></select>
@@ -138,6 +181,38 @@
     </form>
 
     <div id="deudas-list"></div>
+  </section>
+
+  <section class="panel" id="panel-progreso">
+    <div class="section-head">
+      <h2>Progreso</h2>
+    </div>
+
+    <div class="cards">
+      <div class="card pos">
+        <div class="label">Pagado histórico en deudas</div>
+        <div class="value mono" id="prog-pagado-total">$0</div>
+      </div>
+      <div class="card">
+        <div class="label">% de deuda liquidada</div>
+        <div class="value mono" id="prog-pct">0%</div>
+      </div>
+      <div class="card neg">
+        <div class="label">Promedio mensual de gasto (6 meses)</div>
+        <div class="value mono" id="prog-promedio">$0</div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <h3>Tendencia mensual — gastos vs. pagos a deudas</h3>
+      <svg id="chart-tendencia" viewBox="0 0 600 220" style="width:100%; height:auto; max-height:240px;" role="img" aria-label="Gráfico comparando gastos mensuales y pagos a deudas de los últimos 6 meses"></svg>
+      <div class="legend" id="tendencia-legend"></div>
+    </div>
+
+    <div class="chart-card">
+      <h3>Avance por deuda</h3>
+      <div id="progreso-deudas-list"></div>
+    </div>
   </section>
 
   <footer class="pwa-hint">Tus datos se guardan en este dispositivo, en este navegador.</footer>

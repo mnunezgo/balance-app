@@ -3,9 +3,10 @@
 
   var CATS = ["Comida","Transporte","Vivienda","Servicios","Entretenimiento","Salud","Educación","Otros"];
   var CAT_COLOR = {"Comida":"var(--cat-1)","Transporte":"var(--cat-2)","Vivienda":"var(--cat-3)","Servicios":"var(--cat-4)","Entretenimiento":"var(--cat-5)","Salud":"var(--cat-6)","Educación":"var(--cat-7)","Otros":"var(--cat-8)"};
-  var STORAGE_KEY = "balance-app-data-v1";
+  var STORAGE_KEY = "balance-app-data-v2";
+  var LEGACY_KEY = "balance-app-data-v1";
 
-  var state = { gastos: [], deudas: [] };
+  var state = { gastos: [], deudas: [], recurrentes: [], remindersShown: {} };
   var bannerTimer = null;
 
   var fmt = new Intl.NumberFormat('es', {style:'currency', currency:'USD', maximumFractionDigits:2});
@@ -13,6 +14,11 @@
   function todayISO(){ var d=new Date(); return d.toISOString().slice(0,10); }
   function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random())); }
   function monthKey(iso){ return (iso||"").slice(0,7); }
+  function addMonthsKey(mk, n){
+    var parts = mk.split('-'); var y = parseInt(parts[0],10); var m = parseInt(parts[1],10)-1;
+    var d = new Date(y, m+n, 1);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
 
   function showBanner(msg, autoHide){
     var b = document.getElementById('banner');
@@ -22,13 +28,35 @@
   }
 
   // ---- persistence (localStorage, per device) ----
+  function pagadoTotal(d){
+    return (d.pagos||[]).reduce(function(s,p){ return s + (Number(p.monto)||0); }, 0);
+  }
+
+  function migrate(parsed){
+    var data = { gastos: parsed.gastos||[], deudas: parsed.deudas||[], recurrentes: parsed.recurrentes||[], remindersShown: parsed.remindersShown||{} };
+    data.deudas.forEach(function(d){
+      if (!d.pagos){
+        d.pagos = [];
+        if (d.montoPagado && Number(d.montoPagado) > 0){
+          d.pagos.push({id: uid(), fecha: d.createdAt ? new Date(d.createdAt).toISOString().slice(0,10) : todayISO(), monto: Number(d.montoPagado)});
+        }
+        delete d.montoPagado;
+      }
+    });
+    return data;
+  }
+
   function load(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
       if (raw){
-        var parsed = JSON.parse(raw);
-        state.gastos = parsed.gastos || [];
-        state.deudas = parsed.deudas || [];
+        state = migrate(JSON.parse(raw));
+        return;
+      }
+      var legacy = localStorage.getItem(LEGACY_KEY);
+      if (legacy){
+        state = migrate(JSON.parse(legacy));
+        save();
       }
     } catch(e){
       console.error(e);
@@ -37,7 +65,7 @@
   }
   function save(){
     try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({gastos: state.gastos, deudas: state.deudas}));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch(e){
       console.error(e);
       showBanner('No se pudo guardar — puede que el almacenamiento esté lleno o bloqueado.', true);
@@ -45,14 +73,17 @@
   }
 
   // ---- populate static selects ----
-  var gCatSel = document.getElementById('g-categoria');
-  var filterCatSel = document.getElementById('filter-cat');
-  CATS.forEach(function(c){
-    var o = document.createElement('option'); o.value=c; o.textContent=c; gCatSel.appendChild(o);
-  });
-  var allCatOpt = document.createElement('option'); allCatOpt.value=''; allCatOpt.textContent='Todas las categorías';
-  filterCatSel.appendChild(allCatOpt);
-  CATS.forEach(function(c){ var o=document.createElement('option'); o.value=c; o.textContent=c; filterCatSel.appendChild(o); });
+  function fillCategorySelect(sel, withAll){
+    sel.innerHTML = '';
+    if (withAll){
+      var allOpt = document.createElement('option'); allOpt.value=''; allOpt.textContent='Todas las categorías';
+      sel.appendChild(allOpt);
+    }
+    CATS.forEach(function(c){ var o=document.createElement('option'); o.value=c; o.textContent=c; sel.appendChild(o); });
+  }
+  fillCategorySelect(document.getElementById('g-categoria'), false);
+  fillCategorySelect(document.getElementById('filter-cat'), true);
+  fillCategorySelect(document.getElementById('r-categoria'), false);
   document.getElementById('g-fecha').value = todayISO();
 
   // ---- tabs ----
@@ -88,9 +119,50 @@
   // ---- rendering ----
   function renderAll(){
     refreshMonthFilter();
+    renderRecurrentes();
     renderGastos();
     renderDeudas();
     renderResumen();
+    renderProgreso();
+  }
+
+  function renderRecurrentes(){
+    var mes = todayISO().slice(0,7);
+    var list = document.getElementById('recurrentes-list');
+    list.innerHTML = '';
+    if (!state.recurrentes.length){
+      var e = document.createElement('li'); e.className='empty'; e.textContent='No tienes pagos recurrentes todavía. Agrega renta, suscripciones, servicios...';
+      list.appendChild(e); return;
+    }
+    state.recurrentes.slice().sort(function(a,b){ return (a.dia||0)-(b.dia||0); }).forEach(function(r){
+      var linked = state.gastos.find(function(g){ return g.recurrenteId===r.id && monthKey(g.fecha)===mes; });
+      var li = document.createElement('li'); li.className = 'rec-item' + (linked ? ' checked':'');
+      var box = document.createElement('span'); box.className='checkbox';
+      box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+      box.addEventListener('click', function(){ toggleRecurrente(r, linked); });
+      var main = document.createElement('div'); main.className='main';
+      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = r.nombre;
+      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = r.categoria + ' · día ' + r.dia + ' de cada mes';
+      main.appendChild(desc); main.appendChild(meta);
+      var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(r.monto);
+      var del = document.createElement('button'); del.className='del'; del.setAttribute('aria-label','Eliminar recurrente'); del.textContent='✕';
+      del.addEventListener('click', function(){ deleteRecurrente(r.id); });
+      li.appendChild(box); li.appendChild(main); li.appendChild(amount); li.appendChild(del);
+      list.appendChild(li);
+    });
+  }
+
+  function toggleRecurrente(r, existingGasto){
+    if (existingGasto){
+      deleteGasto(existingGasto.id);
+    } else {
+      addGasto({fecha: todayISO(), categoria: r.categoria, monto: r.monto, descripcion: r.nombre, recurrenteId: r.id});
+    }
+  }
+
+  function deleteRecurrente(id){
+    state.recurrentes = state.recurrentes.filter(function(r){ return r.id!==id; });
+    save(); renderAll();
   }
 
   function renderGastos(){
@@ -113,7 +185,7 @@
       var dot = document.createElement('span'); dot.className='dot'; dot.style.background = CAT_COLOR[g.categoria]||'var(--cat-8)';
       var main = document.createElement('div'); main.className='main';
       var desc = document.createElement('div'); desc.className='desc'; desc.textContent = g.descripcion ? g.descripcion : g.categoria;
-      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = g.categoria + ' · ' + formatDate(g.fecha);
+      var meta = document.createElement('div'); meta.className='meta'; meta.textContent = g.categoria + ' · ' + formatDate(g.fecha) + (g.recurrenteId ? ' · recurrente' : '');
       main.appendChild(desc); main.appendChild(meta);
       var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(g.monto);
       var del = document.createElement('button'); del.className='del'; del.setAttribute('aria-label','Eliminar gasto'); del.textContent='✕';
@@ -130,11 +202,13 @@
   }
 
   function debtStatus(d){
-    var restante = Number(d.montoTotal||0) - Number(d.montoPagado||0);
+    var restante = Number(d.montoTotal||0) - pagadoTotal(d);
     if (restante <= 0.004) return 'done';
     if (d.fechaLimite && d.fechaLimite < todayISO()) return 'late';
     return 'pending';
   }
+
+  var openHistory = {};
 
   function renderDeudas(){
     var wrap = document.getElementById('deudas-list');
@@ -158,7 +232,7 @@
     }
 
     items.forEach(function(d){
-      var total = Number(d.montoTotal||0), pagado = Number(d.montoPagado||0);
+      var total = Number(d.montoTotal||0), pagado = pagadoTotal(d);
       var pct = total > 0 ? Math.min(100, Math.max(0, (pagado/total)*100)) : 0;
       var st = debtStatus(d);
 
@@ -190,11 +264,25 @@
         addBtn.addEventListener('click', function(){
           var v = parseFloat(input.value);
           if (!v || v<=0) return;
-          var nuevo = Math.min(total, pagado+v);
-          updateDeuda(d.id, {montoPagado: nuevo});
+          var restante = Math.max(0, total-pagado);
+          var monto = Math.min(v, restante);
+          addPago(d.id, monto);
           input.value='';
         });
         actions.appendChild(input); actions.appendChild(addBtn);
+      }
+      if (d.fechaLimite){
+        var calBtn = document.createElement('button'); calBtn.className='small cal';
+        calBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Recordatorio';
+        calBtn.addEventListener('click', function(){
+          downloadICS({
+            uid: 'deuda-'+d.id,
+            title: 'Vence: ' + d.entidad,
+            description: 'Pago pendiente de ' + money(Math.max(0,total-pagado)) + ' — registrado en Balance.',
+            dateISO: d.fechaLimite
+          });
+        });
+        actions.appendChild(calBtn);
       }
       var delBtn = document.createElement('button'); delBtn.className='small ghost'; delBtn.textContent='Eliminar';
       delBtn.addEventListener('click', function(){ deleteDeuda(d.id); });
@@ -203,6 +291,34 @@
       foot.appendChild(pill); foot.appendChild(actions);
 
       card.appendChild(head); card.appendChild(figures); card.appendChild(track); card.appendChild(foot);
+
+      if ((d.pagos||[]).length){
+        var toggleBtn = document.createElement('button'); toggleBtn.className='toggle-history';
+        var isOpen = !!openHistory[d.id];
+        toggleBtn.textContent = isOpen ? 'Ocultar historial de pagos' : 'Ver historial de pagos (' + d.pagos.length + ')';
+        toggleBtn.addEventListener('click', function(){
+          openHistory[d.id] = !openHistory[d.id];
+          renderDeudas();
+        });
+        card.appendChild(toggleBtn);
+
+        if (isOpen){
+          var hist = document.createElement('div'); hist.className='pay-history';
+          d.pagos.slice().sort(function(a,b){ return (b.fecha||'').localeCompare(a.fecha||''); }).forEach(function(p){
+            var row = document.createElement('div'); row.className='pay-row';
+            var left2 = document.createElement('span'); left2.textContent = formatDate(p.fecha);
+            var right2 = document.createElement('span');
+            var amtSpan = document.createElement('span'); amtSpan.className='amt mono'; amtSpan.textContent = money(p.monto);
+            var delP = document.createElement('button'); delP.textContent='✕'; delP.setAttribute('aria-label','Eliminar pago');
+            delP.addEventListener('click', function(){ deletePago(d.id, p.id); });
+            right2.appendChild(amtSpan); right2.appendChild(delP);
+            row.appendChild(left2); row.appendChild(right2);
+            hist.appendChild(row);
+          });
+          card.appendChild(hist);
+        }
+      }
+
       wrap.appendChild(card);
     });
   }
@@ -211,12 +327,17 @@
     var mes = todayISO().slice(0,7);
     var gastosMes = state.gastos.filter(function(g){ return monthKey(g.fecha)===mes; });
     var totalGastosMes = gastosMes.reduce(function(s,g){ return s+Number(g.monto||0); }, 0);
+    var pagadoMes = 0;
+    state.deudas.forEach(function(d){
+      (d.pagos||[]).forEach(function(p){ if (monthKey(p.fecha)===mes) pagadoMes += Number(p.monto||0); });
+    });
     var deudaPendiente = state.deudas.reduce(function(s,d){
-      var r = Number(d.montoTotal||0)-Number(d.montoPagado||0);
+      var r = Number(d.montoTotal||0)-pagadoTotal(d);
       return s + (r>0 ? r : 0);
     }, 0);
 
     document.getElementById('sum-gastos-mes').textContent = money(totalGastosMes);
+    document.getElementById('sum-pagado-mes').textContent = money(pagadoMes);
     document.getElementById('sum-deuda-pendiente').textContent = money(deudaPendiente);
     document.getElementById('sum-total').textContent = money(totalGastosMes + deudaPendiente);
 
@@ -281,7 +402,7 @@
       ul.appendChild(e);
     } else {
       upcoming.forEach(function(d){
-        var restante = Number(d.montoTotal||0)-Number(d.montoPagado||0);
+        var restante = Number(d.montoTotal||0)-pagadoTotal(d);
         var li = document.createElement('li'); li.className='item';
         var dot = document.createElement('span'); dot.className='dot';
         dot.style.background = debtStatus(d)==='late' ? 'var(--danger)' : 'var(--warning)';
@@ -291,9 +412,113 @@
         main.appendChild(desc); main.appendChild(meta);
         var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(restante);
         li.appendChild(dot); li.appendChild(main); li.appendChild(amount);
+        if (d.fechaLimite){
+          var calBtn = document.createElement('button'); calBtn.className='small cal';
+          calBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
+          calBtn.title = 'Agregar al calendario';
+          calBtn.addEventListener('click', function(){
+            downloadICS({ uid:'deuda-'+d.id, title:'Vence: '+d.entidad, description:'Pago pendiente de '+money(restante)+' — Balance.', dateISO: d.fechaLimite });
+          });
+          li.appendChild(calBtn);
+        }
         ul.appendChild(li);
       });
     }
+  }
+
+  function renderProgreso(){
+    var pagadoHist = 0, totalHist = 0;
+    state.deudas.forEach(function(d){ pagadoHist += pagadoTotal(d); totalHist += Number(d.montoTotal||0); });
+    document.getElementById('prog-pagado-total').textContent = money(pagadoHist);
+    document.getElementById('prog-pct').textContent = totalHist>0 ? Math.round((pagadoHist/totalHist)*100)+'%' : '—';
+
+    var months = [];
+    var cursor = todayISO().slice(0,7);
+    for (var i=5;i>=0;i--){ months.push(addMonthsKey(cursor,-i)); }
+
+    var gastoPorMes = {}, pagoPorMes = {};
+    months.forEach(function(m){ gastoPorMes[m]=0; pagoPorMes[m]=0; });
+    state.gastos.forEach(function(g){ var mk=monthKey(g.fecha); if (mk in gastoPorMes) gastoPorMes[mk]+=Number(g.monto||0); });
+    state.deudas.forEach(function(d){ (d.pagos||[]).forEach(function(p){ var mk=monthKey(p.fecha); if (mk in pagoPorMes) pagoPorMes[mk]+=Number(p.monto||0); }); });
+
+    var promedio = months.reduce(function(s,m){ return s+gastoPorMes[m]; }, 0) / months.length;
+    document.getElementById('prog-promedio').textContent = money(promedio);
+
+    drawTendencia(months, gastoPorMes, pagoPorMes);
+
+    var wrap = document.getElementById('progreso-deudas-list');
+    wrap.innerHTML = '';
+    if (!state.deudas.length){
+      wrap.innerHTML = '<div class="empty">Agrega una deuda para ver su avance aquí.</div>';
+      return;
+    }
+    state.deudas.slice().sort(function(a,b){
+      var pa = Number(a.montoTotal)>0 ? pagadoTotal(a)/Number(a.montoTotal) : 0;
+      var pb = Number(b.montoTotal)>0 ? pagadoTotal(b)/Number(b.montoTotal) : 0;
+      return pb-pa;
+    }).forEach(function(d){
+      var total = Number(d.montoTotal||0), pagado = pagadoTotal(d);
+      var pct = total>0 ? Math.min(100, (pagado/total)*100) : 0;
+      var row = document.createElement('div'); row.className='prog-debt-row';
+      var name = document.createElement('div'); name.className='name'; name.textContent = d.entidad;
+      var track = document.createElement('div'); track.className='bar-track';
+      var fill = document.createElement('div'); fill.className='bar-fill'; fill.style.width = pct+'%';
+      if (pct>=100) fill.style.background = 'var(--success)';
+      track.appendChild(fill);
+      var pctEl = document.createElement('div'); pctEl.className='pct mono'; pctEl.textContent = Math.round(pct)+'%';
+      row.appendChild(name); row.appendChild(track); row.appendChild(pctEl);
+      wrap.appendChild(row);
+    });
+  }
+
+  function drawTendencia(months, gastoPorMes, pagoPorMes){
+    var svg = document.getElementById('chart-tendencia');
+    svg.innerHTML = '';
+    var w = 600, h = 220;
+    var padL = 10, padTop = 10, padBottom = 34;
+    var plotW = w - padL*2;
+    var plotH = h - padTop - padBottom;
+    var n = months.length;
+    var groupGap = 18;
+    var groupW = (plotW - groupGap*(n-1)) / n;
+    var barGap = 4;
+    var barW = (groupW - barGap) / 2;
+    var max = Math.max.apply(null, months.map(function(m){ return Math.max(gastoPorMes[m], pagoPorMes[m]); }).concat([1]));
+    var cs = getComputedStyle(document.documentElement);
+    var colorGasto = cs.getPropertyValue('--danger');
+    var colorPago = cs.getPropertyValue('--accent');
+
+    months.forEach(function(m, i){
+      var gx = padL + i*(groupW+groupGap);
+      var gVal = gastoPorMes[m], pVal = pagoPorMes[m];
+      var gH = max>0 ? (gVal/max)*plotH : 0;
+      var pH = max>0 ? (pVal/max)*plotH : 0;
+
+      var r1 = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      r1.setAttribute('x', gx); r1.setAttribute('y', padTop+(plotH-gH));
+      r1.setAttribute('width', barW); r1.setAttribute('height', Math.max(gH,1));
+      r1.setAttribute('rx', 2); r1.setAttribute('fill', colorGasto);
+      svg.appendChild(r1);
+
+      var r2 = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      r2.setAttribute('x', gx+barW+barGap); r2.setAttribute('y', padTop+(plotH-pH));
+      r2.setAttribute('width', barW); r2.setAttribute('height', Math.max(pH,1));
+      r2.setAttribute('rx', 2); r2.setAttribute('fill', colorPago);
+      svg.appendChild(r2);
+
+      var label = document.createElementNS('http://www.w3.org/2000/svg','text');
+      label.setAttribute('x', gx+groupW/2); label.setAttribute('y', h-14);
+      label.setAttribute('text-anchor','middle'); label.setAttribute('font-size','10');
+      label.setAttribute('fill', cs.getPropertyValue('--ink-soft'));
+      var d = new Date(m+'-02');
+      label.textContent = d.toLocaleDateString('es', {month:'short'});
+      svg.appendChild(label);
+    });
+
+    var legend = document.getElementById('tendencia-legend');
+    legend.innerHTML =
+      '<span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+colorGasto+';"></i> Gastos</span>' +
+      '<span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+colorPago+';"></i> Pagos a deudas</span>';
   }
 
   // ---- data ops ----
@@ -308,9 +533,17 @@
     d.id = uid(); d.createdAt = Date.now();
     state.deudas.push(d); save(); renderAll();
   }
-  function updateDeuda(id, patch){
-    var d = state.deudas.find(function(x){ return x.id===id; });
-    if (d) Object.assign(d, patch);
+  function addPago(deudaId, monto){
+    var d = state.deudas.find(function(x){ return x.id===deudaId; });
+    if (!d) return;
+    d.pagos = d.pagos || [];
+    d.pagos.push({id: uid(), fecha: todayISO(), monto: monto});
+    save(); renderAll();
+  }
+  function deletePago(deudaId, pagoId){
+    var d = state.deudas.find(function(x){ return x.id===deudaId; });
+    if (!d) return;
+    d.pagos = (d.pagos||[]).filter(function(p){ return p.id!==pagoId; });
     save(); renderAll();
   }
   function deleteDeuda(id){
@@ -338,9 +571,28 @@
     var fechaLimite = document.getElementById('d-fecha').value || '';
     var notas = document.getElementById('d-notas').value.trim();
     if (!entidad || !total || total<=0) return;
-    addDeuda({entidad:entidad, montoTotal:total, montoPagado:Math.min(pagado,total), fechaLimite:fechaLimite, notas:notas});
+    var nueva = {entidad:entidad, montoTotal:total, fechaLimite:fechaLimite, notas:notas, pagos:[]};
+    if (pagado>0){ nueva.pagos.push({id:uid(), fecha: todayISO(), monto: Math.min(pagado,total)}); }
+    addDeuda(nueva);
     ev.target.reset();
     document.getElementById('d-pagado').value = '0';
+  });
+
+  document.getElementById('btn-toggle-recurrente').addEventListener('click', function(){
+    var form = document.getElementById('form-recurrente');
+    form.hidden = !form.hidden;
+  });
+  document.getElementById('form-recurrente').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    var nombre = document.getElementById('r-nombre').value.trim();
+    var categoria = document.getElementById('r-categoria').value;
+    var monto = parseFloat(document.getElementById('r-monto').value);
+    var dia = parseInt(document.getElementById('r-dia').value, 10);
+    if (!nombre || !monto || monto<=0 || !dia || dia<1 || dia>28) return;
+    state.recurrentes.push({id: uid(), nombre:nombre, categoria:categoria, monto:monto, dia:dia, createdAt: Date.now()});
+    save(); renderAll();
+    ev.target.reset();
+    document.getElementById('form-recurrente').hidden = true;
   });
 
   document.getElementById('filter-mes').addEventListener('change', renderGastos);
@@ -351,23 +603,32 @@
   function buildWorkbook(){
     var wb = XLSX.utils.book_new();
 
-    var gastosRows = [['Fecha','Categoría','Monto','Descripción']];
+    var gastosRows = [['Fecha','Categoría','Monto','Descripción','Recurrente']];
     state.gastos.slice().sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); })
-      .forEach(function(g){ gastosRows.push([g.fecha||'', g.categoria||'', Number(g.monto)||0, g.descripcion||'']); });
+      .forEach(function(g){ gastosRows.push([g.fecha||'', g.categoria||'', Number(g.monto)||0, g.descripcion||'', g.recurrenteId ? 'Sí' : 'No']); });
     var wsGastos = XLSX.utils.aoa_to_sheet(gastosRows);
-    wsGastos['!cols'] = [{wch:12},{wch:16},{wch:12},{wch:40}];
+    wsGastos['!cols'] = [{wch:12},{wch:16},{wch:12},{wch:40},{wch:11}];
     XLSX.utils.book_append_sheet(wb, wsGastos, 'Gastos');
 
     var deudasRows = [['Entidad','Monto total','Pagado','Restante','Fecha límite','Estado','Notas']];
     state.deudas.slice().sort(function(a,b){ return (a.fechaLimite||'9999').localeCompare(b.fechaLimite||'9999'); })
       .forEach(function(d){
-        var total = Number(d.montoTotal)||0, pagado = Number(d.montoPagado)||0;
+        var total = Number(d.montoTotal)||0, pagado = pagadoTotal(d);
         var estadoTxt = debtStatus(d)==='done' ? 'Pagada' : (debtStatus(d)==='late' ? 'Vencida' : 'Pendiente');
         deudasRows.push([d.entidad||'', total, pagado, Math.max(0,total-pagado), d.fechaLimite||'', estadoTxt, d.notas||'']);
       });
     var wsDeudas = XLSX.utils.aoa_to_sheet(deudasRows);
     wsDeudas['!cols'] = [{wch:22},{wch:12},{wch:12},{wch:12},{wch:13},{wch:11},{wch:34}];
     XLSX.utils.book_append_sheet(wb, wsDeudas, 'Deudas');
+
+    var pagosRows = [['Entidad','Fecha de pago','Monto']];
+    state.deudas.forEach(function(d){
+      (d.pagos||[]).slice().sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); })
+        .forEach(function(p){ pagosRows.push([d.entidad||'', p.fecha||'', Number(p.monto)||0]); });
+    });
+    var wsPagos = XLSX.utils.aoa_to_sheet(pagosRows);
+    wsPagos['!cols'] = [{wch:22},{wch:14},{wch:12}];
+    XLSX.utils.book_append_sheet(wb, wsPagos, 'Historial de pagos');
 
     return wb;
   }
@@ -390,6 +651,102 @@
       showBanner('No se pudo exportar el archivo. Intenta de nuevo.', true);
     }
   });
+
+  // ---- calendar (.ics) reminders — work even when the app is closed, via the phone's own calendar ----
+  function pad2(n){ return String(n).length<2 ? '0'+n : String(n); }
+  function icsDateCompact(iso){ return iso.replace(/-/g,''); }
+  function addDaysISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+  function icsEscape(s){ return String(s||'').replace(/[\\;,]/g, function(m){ return '\\'+m; }).replace(/\n/g,'\\n'); }
+
+  function downloadICS(opts){
+    var start = icsDateCompact(opts.dateISO);
+    var end = icsDateCompact(addDaysISO(opts.dateISO, 1));
+    var stamp = icsDateCompact(todayISO()) + 'T000000Z';
+    var lines = [
+      'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Balance App//ES','CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      'UID:'+opts.uid+'-'+Date.now()+'@balance-app',
+      'DTSTAMP:'+stamp,
+      'DTSTART;VALUE=DATE:'+start,
+      'DTEND;VALUE=DATE:'+end,
+      'SUMMARY:'+icsEscape(opts.title),
+      'DESCRIPTION:'+icsEscape(opts.description||'')
+    ];
+    if (opts.recurringMonthly) lines.push('RRULE:FREQ=MONTHLY');
+    lines.push('BEGIN:VALARM','TRIGGER:-P1D','ACTION:DISPLAY','DESCRIPTION:Recordatorio','END:VALARM');
+    lines.push('END:VEVENT','END:VCALENDAR');
+    var blob = new Blob([lines.join('\r\n')], {type:'text/calendar;charset=utf-8'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (opts.title||'recordatorio').replace(/[^a-z0-9]+/gi,'-').toLowerCase() + '.ics';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+    showBanner('Se descargó el evento — ábrelo para agregarlo a tu calendario y recibir el recordatorio en tu celular.', true);
+  }
+
+  // ---- notifications (only fire while you have the app open — see note below) ----
+  function notify(title, body){
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (navigator.serviceWorker && navigator.serviceWorker.ready){
+      navigator.serviceWorker.ready.then(function(reg){
+        if (reg && reg.showNotification){ reg.showNotification(title, {body: body, icon:'icons/icon-192.png'}); }
+        else { new Notification(title, {body: body}); }
+      }).catch(function(){ new Notification(title, {body: body}); });
+    } else {
+      new Notification(title, {body: body});
+    }
+  }
+
+  function updateNotifyUI(){
+    var supported = 'Notification' in window;
+    var btnHeader = document.getElementById('btn-notify');
+    var card = document.getElementById('notify-card');
+    if (!supported){ btnHeader.hidden = true; card.hidden = true; return; }
+    if (Notification.permission === 'granted'){
+      btnHeader.hidden = false; btnHeader.classList.add('active'); card.hidden = true;
+    } else if (Notification.permission === 'denied'){
+      btnHeader.hidden = true; card.hidden = true;
+    } else {
+      btnHeader.hidden = true; card.hidden = false;
+    }
+  }
+
+  function requestNotifyPermission(){
+    if (!('Notification' in window)) return;
+    Notification.requestPermission().then(function(){
+      updateNotifyUI();
+      checkReminders(true);
+    });
+  }
+  document.getElementById('btn-notify').addEventListener('click', requestNotifyPermission);
+  document.getElementById('btn-notify-inline').addEventListener('click', requestNotifyPermission);
+
+  function checkReminders(force){
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    var today = todayISO();
+    if (!force && state.remindersShown[today]) return;
+
+    var in3 = addDaysISO(today, 3);
+    var urgentes = state.deudas.filter(function(d){
+      if (debtStatus(d)==='done' || !d.fechaLimite) return false;
+      return d.fechaLimite <= in3;
+    });
+    var hoyDia = new Date().getDate();
+    var recPendientes = state.recurrentes.filter(function(r){
+      if (r.dia > hoyDia) return false;
+      var mk = today.slice(0,7);
+      return !state.gastos.some(function(g){ return g.recurrenteId===r.id && monthKey(g.fecha)===mk; });
+    });
+
+    var total = urgentes.length + recPendientes.length;
+    if (total === 0) return;
+
+    var nombres = urgentes.map(function(d){ return d.entidad; }).concat(recPendientes.map(function(r){ return r.nombre; }));
+    var body = nombres.slice(0,4).join(', ') + (nombres.length>4 ? ' y ' + (nombres.length-4) + ' más' : '');
+    notify('Tienes ' + total + ' pago(s) pendiente(s)', body);
+    state.remindersShown[today] = true;
+    save();
+  }
 
   // ---- PWA install prompt (Android/desktop Chrome) ----
   var deferredPrompt = null;
@@ -431,4 +788,6 @@
   // ---- boot ----
   load();
   renderAll();
+  updateNotifyUI();
+  checkReminders(false);
 })();
