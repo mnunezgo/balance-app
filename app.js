@@ -3,22 +3,66 @@
 
   var CATS = ["Comida","Transporte","Vivienda","Servicios","Entretenimiento","Salud","Educación","Otros"];
   var CAT_COLOR = {"Comida":"var(--cat-1)","Transporte":"var(--cat-2)","Vivienda":"var(--cat-3)","Servicios":"var(--cat-4)","Entretenimiento":"var(--cat-5)","Salud":"var(--cat-6)","Educación":"var(--cat-7)","Otros":"var(--cat-8)"};
+  var TIPOS_DEUDA = ["Tarjeta de crédito","Préstamo personal","Préstamo hipotecario","Préstamo automotriz","Préstamo estudiantil","Servicio/Recibo","Préstamo entre personas","Otro"];
+  var FRECUENCIAS = [
+    {value:'unica', label:'Fecha única'},
+    {value:'semanal', label:'Semanal'},
+    {value:'quincenal', label:'Quincenal'},
+    {value:'mensual', label:'Mensual'}
+  ];
+  var FRECUENCIA_LABEL = {unica:'Fecha única', semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual'};
   var STORAGE_KEY = "balance-app-data-v2";
   var LEGACY_KEY = "balance-app-data-v1";
 
   var state = { gastos: [], deudas: [], recurrentes: [], remindersShown: {} };
   var bannerTimer = null;
 
-  var fmt = new Intl.NumberFormat('es', {style:'currency', currency:'USD', maximumFractionDigits:2});
+  var fmt = new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN', maximumFractionDigits:2});
   function money(n){ return fmt.format(Number(n)||0); }
   function todayISO(){ var d=new Date(); return d.toISOString().slice(0,10); }
   function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random())); }
   function monthKey(iso){ return (iso||"").slice(0,7); }
+  function pad2(n){ return String(n).length<2 ? '0'+n : String(n); }
   function addMonthsKey(mk, n){
     var parts = mk.split('-'); var y = parseInt(parts[0],10); var m = parseInt(parts[1],10)-1;
     var d = new Date(y, m+n, 1);
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
   }
+  function addDaysISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+  function addMonthsISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setMonth(d.getMonth()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+
+  function nextDueDate(d){
+    if (!d.fechaLimite) return '';
+    var freq = d.frecuencia || 'unica';
+    if (freq === 'unica') return d.fechaLimite;
+    var next = d.fechaLimite;
+    var today = todayISO();
+    var guard = 0;
+    while (next < today && guard < 1000){
+      if (freq === 'semanal') next = addDaysISO(next, 7);
+      else if (freq === 'quincenal') next = addDaysISO(next, 14);
+      else if (freq === 'mensual') next = addMonthsISO(next, 1);
+      else break;
+      guard++;
+    }
+    return next;
+  }
+
+  // ---- money inputs: live "50,000.00" formatting, typed as plain digits ----
+  function attachMoneyInput(el){
+    el.setAttribute('inputmode','decimal');
+    el.addEventListener('input', function(){
+      var raw = el.value;
+      var clean = raw.replace(/[^\d.]/g,'');
+      var firstDot = clean.indexOf('.');
+      var intPart = firstDot===-1 ? clean : clean.slice(0,firstDot);
+      var decPart = firstDot===-1 ? '' : '.'+clean.slice(firstDot+1).replace(/\./g,'').slice(0,2);
+      intPart = intPart.replace(/^0+(?=\d)/,'');
+      var withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      el.value = withCommas + decPart;
+    });
+  }
+  function parseMoneyInput(el){ return parseFloat(String(el.value).replace(/,/g,'')) || 0; }
 
   function showBanner(msg, autoHide){
     var b = document.getElementById('banner');
@@ -42,6 +86,8 @@
         }
         delete d.montoPagado;
       }
+      if (!d.tipo) d.tipo = 'Otro';
+      if (!d.frecuencia) d.frecuencia = 'unica';
     });
     return data;
   }
@@ -85,6 +131,14 @@
   fillCategorySelect(document.getElementById('filter-cat'), true);
   fillCategorySelect(document.getElementById('r-categoria'), false);
   document.getElementById('g-fecha').value = todayISO();
+
+  var dTipoSel = document.getElementById('d-tipo');
+  TIPOS_DEUDA.forEach(function(t){ var o=document.createElement('option'); o.value=t; o.textContent=t; dTipoSel.appendChild(o); });
+  var dFreqSel = document.getElementById('d-frecuencia');
+  FRECUENCIAS.forEach(function(f){ var o=document.createElement('option'); o.value=f.value; o.textContent=f.label; dFreqSel.appendChild(o); });
+
+  [document.getElementById('g-monto'), document.getElementById('d-total'), document.getElementById('d-pagado'), document.getElementById('r-monto')]
+    .forEach(function(el){ if (el) attachMoneyInput(el); });
 
   // ---- tabs ----
   var tabs = document.querySelectorAll('nav.tabs button');
@@ -204,7 +258,8 @@
   function debtStatus(d){
     var restante = Number(d.montoTotal||0) - pagadoTotal(d);
     if (restante <= 0.004) return 'done';
-    if (d.fechaLimite && d.fechaLimite < todayISO()) return 'late';
+    var due = nextDueDate(d);
+    if (due && due < todayISO()) return 'late';
     return 'pending';
   }
 
@@ -238,9 +293,15 @@
 
       var card = document.createElement('div'); card.className='debt-card' + (st==='done' ? ' done':'');
       var head = document.createElement('div'); head.className='head';
+      var nameWrap = document.createElement('div'); nameWrap.className='name-wrap';
       var name = document.createElement('div'); name.className='name'; name.textContent = d.entidad;
-      var due = document.createElement('div'); due.className='due'; due.textContent = d.fechaLimite ? ('Vence ' + formatDate(d.fechaLimite)) : 'Sin fecha límite';
-      head.appendChild(name); head.appendChild(due);
+      var typeTag = document.createElement('span'); typeTag.className='pill type'; typeTag.textContent = d.tipo || 'Otro';
+      nameWrap.appendChild(name); nameWrap.appendChild(typeTag);
+      var due = document.createElement('div'); due.className='due';
+      var nextDue = nextDueDate(d);
+      var freqLabel = (d.frecuencia && d.frecuencia!=='unica') ? (' · ' + FRECUENCIA_LABEL[d.frecuencia]) : '';
+      due.textContent = nextDue ? ('Vence ' + formatDate(nextDue) + freqLabel) : 'Sin fecha límite';
+      head.appendChild(nameWrap); head.appendChild(due);
 
       var figures = document.createElement('div'); figures.className='figures';
       var left = document.createElement('span'); left.innerHTML = '<span class="paid mono">'+money(pagado)+'</span> de <span class="mono">'+money(total)+'</span>';
@@ -259,10 +320,11 @@
 
       var actions = document.createElement('div'); actions.className='debt-actions';
       if (st !== 'done'){
-        var input = document.createElement('input'); input.type='number'; input.min='0'; input.step='0.01'; input.placeholder='Abono';
+        var input = document.createElement('input'); input.type='text'; input.placeholder='Abono';
+        attachMoneyInput(input);
         var addBtn = document.createElement('button'); addBtn.className='small'; addBtn.textContent='Abonar';
         addBtn.addEventListener('click', function(){
-          var v = parseFloat(input.value);
+          var v = parseMoneyInput(input);
           if (!v || v<=0) return;
           var restante = Math.max(0, total-pagado);
           var monto = Math.min(v, restante);
@@ -279,7 +341,8 @@
             uid: 'deuda-'+d.id,
             title: 'Vence: ' + d.entidad,
             description: 'Pago pendiente de ' + money(Math.max(0,total-pagado)) + ' — registrado en Balance.',
-            dateISO: d.fechaLimite
+            dateISO: d.fechaLimite,
+            frecuencia: d.frecuencia
           });
         });
         actions.appendChild(calBtn);
@@ -393,7 +456,7 @@
     }
 
     var upcoming = state.deudas.filter(function(d){ return debtStatus(d)!=='done'; })
-      .sort(function(a,b){ return (a.fechaLimite||'9999').localeCompare(b.fechaLimite||'9999'); })
+      .sort(function(a,b){ return (nextDueDate(a)||'9999').localeCompare(nextDueDate(b)||'9999'); })
       .slice(0,5);
     var ul = document.getElementById('upcoming-list');
     ul.innerHTML = '';
@@ -408,7 +471,9 @@
         dot.style.background = debtStatus(d)==='late' ? 'var(--danger)' : 'var(--warning)';
         var main = document.createElement('div'); main.className='main';
         var desc = document.createElement('div'); desc.className='desc'; desc.textContent = d.entidad;
-        var meta = document.createElement('div'); meta.className='meta'; meta.textContent = d.fechaLimite ? formatDate(d.fechaLimite) : 'Sin fecha límite';
+        var nextDue = nextDueDate(d);
+        var freqLabel = (d.frecuencia && d.frecuencia!=='unica') ? (' · ' + FRECUENCIA_LABEL[d.frecuencia]) : '';
+        var meta = document.createElement('div'); meta.className='meta'; meta.textContent = nextDue ? (formatDate(nextDue) + freqLabel) : 'Sin fecha límite';
         main.appendChild(desc); main.appendChild(meta);
         var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(restante);
         li.appendChild(dot); li.appendChild(main); li.appendChild(amount);
@@ -417,7 +482,7 @@
           calBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
           calBtn.title = 'Agregar al calendario';
           calBtn.addEventListener('click', function(){
-            downloadICS({ uid:'deuda-'+d.id, title:'Vence: '+d.entidad, description:'Pago pendiente de '+money(restante)+' — Balance.', dateISO: d.fechaLimite });
+            downloadICS({ uid:'deuda-'+d.id, title:'Vence: '+d.entidad, description:'Pago pendiente de '+money(restante)+' — Balance.', dateISO: d.fechaLimite, frecuencia: d.frecuencia });
           });
           li.appendChild(calBtn);
         }
@@ -555,7 +620,7 @@
     ev.preventDefault();
     var fecha = document.getElementById('g-fecha').value || todayISO();
     var categoria = document.getElementById('g-categoria').value;
-    var monto = parseFloat(document.getElementById('g-monto').value);
+    var monto = parseMoneyInput(document.getElementById('g-monto'));
     var descripcion = document.getElementById('g-desc').value.trim();
     if (!monto || monto<=0) return;
     addGasto({fecha:fecha, categoria:categoria, monto:monto, descripcion:descripcion});
@@ -566,12 +631,14 @@
   document.getElementById('form-deuda').addEventListener('submit', function(ev){
     ev.preventDefault();
     var entidad = document.getElementById('d-entidad').value.trim();
-    var total = parseFloat(document.getElementById('d-total').value);
-    var pagado = parseFloat(document.getElementById('d-pagado').value) || 0;
+    var tipo = document.getElementById('d-tipo').value;
+    var frecuencia = document.getElementById('d-frecuencia').value;
+    var total = parseMoneyInput(document.getElementById('d-total'));
+    var pagado = parseMoneyInput(document.getElementById('d-pagado'));
     var fechaLimite = document.getElementById('d-fecha').value || '';
     var notas = document.getElementById('d-notas').value.trim();
     if (!entidad || !total || total<=0) return;
-    var nueva = {entidad:entidad, montoTotal:total, fechaLimite:fechaLimite, notas:notas, pagos:[]};
+    var nueva = {entidad:entidad, tipo:tipo, frecuencia:frecuencia, montoTotal:total, fechaLimite:fechaLimite, notas:notas, pagos:[]};
     if (pagado>0){ nueva.pagos.push({id:uid(), fecha: todayISO(), monto: Math.min(pagado,total)}); }
     addDeuda(nueva);
     ev.target.reset();
@@ -586,7 +653,7 @@
     ev.preventDefault();
     var nombre = document.getElementById('r-nombre').value.trim();
     var categoria = document.getElementById('r-categoria').value;
-    var monto = parseFloat(document.getElementById('r-monto').value);
+    var monto = parseMoneyInput(document.getElementById('r-monto'));
     var dia = parseInt(document.getElementById('r-dia').value, 10);
     if (!nombre || !monto || monto<=0 || !dia || dia<1 || dia>28) return;
     state.recurrentes.push({id: uid(), nombre:nombre, categoria:categoria, monto:monto, dia:dia, createdAt: Date.now()});
@@ -610,15 +677,15 @@
     wsGastos['!cols'] = [{wch:12},{wch:16},{wch:12},{wch:40},{wch:11}];
     XLSX.utils.book_append_sheet(wb, wsGastos, 'Gastos');
 
-    var deudasRows = [['Entidad','Monto total','Pagado','Restante','Fecha límite','Estado','Notas']];
-    state.deudas.slice().sort(function(a,b){ return (a.fechaLimite||'9999').localeCompare(b.fechaLimite||'9999'); })
+    var deudasRows = [['Entidad','Tipo','Frecuencia','Monto total','Pagado','Restante','Próximo vencimiento','Estado','Notas']];
+    state.deudas.slice().sort(function(a,b){ return (nextDueDate(a)||'9999').localeCompare(nextDueDate(b)||'9999'); })
       .forEach(function(d){
         var total = Number(d.montoTotal)||0, pagado = pagadoTotal(d);
         var estadoTxt = debtStatus(d)==='done' ? 'Pagada' : (debtStatus(d)==='late' ? 'Vencida' : 'Pendiente');
-        deudasRows.push([d.entidad||'', total, pagado, Math.max(0,total-pagado), d.fechaLimite||'', estadoTxt, d.notas||'']);
+        deudasRows.push([d.entidad||'', d.tipo||'Otro', FRECUENCIA_LABEL[d.frecuencia]||'Fecha única', total, pagado, Math.max(0,total-pagado), nextDueDate(d)||'', estadoTxt, d.notas||'']);
       });
     var wsDeudas = XLSX.utils.aoa_to_sheet(deudasRows);
-    wsDeudas['!cols'] = [{wch:22},{wch:12},{wch:12},{wch:12},{wch:13},{wch:11},{wch:34}];
+    wsDeudas['!cols'] = [{wch:22},{wch:18},{wch:12},{wch:12},{wch:12},{wch:12},{wch:16},{wch:11},{wch:34}];
     XLSX.utils.book_append_sheet(wb, wsDeudas, 'Deudas');
 
     var pagosRows = [['Entidad','Fecha de pago','Monto']];
@@ -653,9 +720,7 @@
   });
 
   // ---- calendar (.ics) reminders — work even when the app is closed, via the phone's own calendar ----
-  function pad2(n){ return String(n).length<2 ? '0'+n : String(n); }
   function icsDateCompact(iso){ return iso.replace(/-/g,''); }
-  function addDaysISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
   function icsEscape(s){ return String(s||'').replace(/[\\;,]/g, function(m){ return '\\'+m; }).replace(/\n/g,'\\n'); }
 
   function downloadICS(opts){
@@ -673,6 +738,9 @@
       'DESCRIPTION:'+icsEscape(opts.description||'')
     ];
     if (opts.recurringMonthly) lines.push('RRULE:FREQ=MONTHLY');
+    else if (opts.frecuencia === 'semanal') lines.push('RRULE:FREQ=WEEKLY');
+    else if (opts.frecuencia === 'quincenal') lines.push('RRULE:FREQ=WEEKLY;INTERVAL=2');
+    else if (opts.frecuencia === 'mensual') lines.push('RRULE:FREQ=MONTHLY');
     lines.push('BEGIN:VALARM','TRIGGER:-P1D','ACTION:DISPLAY','DESCRIPTION:Recordatorio','END:VALARM');
     lines.push('END:VEVENT','END:VCALENDAR');
     var blob = new Blob([lines.join('\r\n')], {type:'text/calendar;charset=utf-8'});

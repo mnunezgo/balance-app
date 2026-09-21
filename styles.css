@@ -123,8 +123,10 @@ li.item{
 
 .debt-card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px; box-shadow:var(--shadow); margin-bottom:10px;}
 .debt-card .head{display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:4px; flex-wrap:wrap;}
+.debt-card .head .name-wrap{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
 .debt-card .head .name{font-weight:600; font-size:1rem;}
 .debt-card .head .due{font-size:.78rem; color:var(--ink-soft);}
+.pill.type{background:var(--surface-2); color:var(--ink-soft);}
 .debt-card .figures{display:flex; justify-content:space-between; font-size:.82rem; color:var(--ink-soft); margin-bottom:6px;}
 .debt-card .figures .paid{color:var(--ink); font-weight:600;}
 .bar-track{height:9px; border-radius:5px; background:var(--surface-2); overflow:hidden; margin-bottom:10px;}
