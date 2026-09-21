@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Balance — Gastos y Deudas</title>
+<meta name="description" content="Registra tus gastos por categoría y da seguimiento a tus deudas.">
+<meta name="theme-color" content="#2B6F68">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Balance">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="wrap">
+  <h2 class="sr-only">Balance: aplicación personal para registrar gastos y deudas, con resumen de totales, lista filtrable de gastos por categoría y seguimiento de pagos de deudas.</h2>
+
+  <header class="top">
+    <div class="title-group">
+      <h1>Balance</h1>
+      <span class="tag">Gastos y deudas, todo en un lugar</span>
+    </div>
+    <div class="header-actions">
+      <button type="button" class="install" id="btn-install" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M6 10l6 6 6-6"/><path d="M4 20h16"/></svg>
+        Instalar app
+      </button>
+      <button type="button" class="export" id="btn-export">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 20h16"/></svg>
+        Exportar a Excel
+      </button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <nav class="tabs" role="tablist" aria-label="Secciones">
+    <button role="tab" aria-selected="true" data-tab="resumen">Resumen</button>
+    <button role="tab" aria-selected="false" data-tab="gastos">Gastos</button>
+    <button role="tab" aria-selected="false" data-tab="deudas">Deudas</button>
+  </nav>
+
+  <section class="panel active" id="panel-resumen">
+    <div class="cards">
+      <div class="card neg">
+        <div class="label">Gastado este mes</div>
+        <div class="value mono" id="sum-gastos-mes">$0</div>
+      </div>
+      <div class="card neg">
+        <div class="label">Deuda pendiente</div>
+        <div class="value mono" id="sum-deuda-pendiente">$0</div>
+      </div>
+      <div class="card" id="card-balance">
+        <div class="label">Comprometido total (mes + deudas)</div>
+        <div class="value mono" id="sum-total">$0</div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <h3>Gastos por categoría — este mes</h3>
+      <svg id="chart" viewBox="0 0 600 200" style="width:100%; height:auto; max-height:220px;" role="img" aria-label="Gráfico de barras de gastos por categoría este mes"></svg>
+      <div class="legend" id="chart-legend"></div>
+    </div>
+
+    <div class="chart-card">
+      <h3>Próximos vencimientos</h3>
+      <ul class="list" id="upcoming-list"></ul>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-gastos">
+    <div class="section-head">
+      <h2>Gastos</h2>
+      <div class="filters">
+        <select id="filter-mes"></select>
+        <select id="filter-cat"></select>
+      </div>
+    </div>
+
+    <form class="entry" id="form-gasto">
+      <div class="row">
+        <label>Fecha
+          <input type="date" id="g-fecha" required>
+        </label>
+        <label>Categoría
+          <select id="g-categoria" required></select>
+        </label>
+        <label>Monto
+          <input type="number" id="g-monto" min="0" step="0.01" placeholder="0.00" required>
+        </label>
+      </div>
+      <div class="row">
+        <textarea id="g-desc" placeholder="Descripción (opcional) — ej. Supermercado, gasolina..."></textarea>
+      </div>
+      <div class="actions-row"><button type="submit" class="primary">Agregar gasto</button></div>
+    </form>
+
+    <ul class="list" id="gastos-list"></ul>
+  </section>
+
+  <section class="panel" id="panel-deudas">
+    <div class="section-head">
+      <h2>Deudas</h2>
+      <div class="filters">
+        <select id="filter-deuda-estado">
+          <option value="todas">Todas</option>
+          <option value="pendiente">Pendientes</option>
+          <option value="pagada">Pagadas</option>
+        </select>
+      </div>
+    </div>
+
+    <form class="entry" id="form-deuda">
+      <div class="row">
+        <label>Acreedor / entidad
+          <input type="text" id="d-entidad" placeholder="Ej. Tarjeta BAC, Préstamo Juan..." required>
+        </label>
+        <label>Monto total
+          <input type="number" id="d-total" min="0" step="0.01" placeholder="0.00" required>
+        </label>
+        <label>Ya pagado
+          <input type="number" id="d-pagado" min="0" step="0.01" placeholder="0.00" value="0">
+        </label>
+        <label>Fecha límite
+          <input type="date" id="d-fecha">
+        </label>
+      </div>
+      <div class="row">
+        <textarea id="d-notas" placeholder="Notas (opcional)"></textarea>
+      </div>
+      <div class="actions-row"><button type="submit" class="primary">Agregar deuda</button></div>
+    </form>
+
+    <div id="deudas-list"></div>
+  </section>
+
+  <footer class="pwa-hint">Tus datos se guardan en este dispositivo, en este navegador.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
