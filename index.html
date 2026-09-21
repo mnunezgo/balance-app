@@ -172,14 +172,22 @@
         </label>
       </div>
       <div class="row">
-        <label>Monto total
+        <label>Monto total de la deuda
           <input type="text" id="d-total" placeholder="0.00" required>
         </label>
         <label>Ya pagado
           <input type="text" id="d-pagado" placeholder="0.00" value="0">
         </label>
-        <label>Próxima fecha de pago
+        <label><span id="d-fecha-label">Fecha límite</span>
           <input type="date" id="d-fecha">
+        </label>
+      </div>
+      <div class="row" id="cuota-fields" hidden>
+        <label>Monto de cada cuota
+          <input type="text" id="d-monto-cuota" placeholder="0.00">
+        </label>
+        <label>Número de cuotas (opcional)
+          <input type="number" id="d-num-cuotas" min="1" placeholder="Ej. 12">
         </label>
       </div>
       <div class="row">

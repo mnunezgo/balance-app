@@ -10,9 +10,10 @@
     {value:'quincenal', label:'Quincenal'},
     {value:'mensual', label:'Mensual'}
   ];
-  var FRECUENCIA_LABEL = {unica:'Fecha única', semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual'};
-  var STORAGE_KEY = "balance-app-data-v2";
-  var LEGACY_KEY = "balance-app-data-v1";
+  var FRECUENCIA_LABEL = {unica:'Pago único', semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual'};
+  var ESTADO_LABEL = {pagada:'Pagada', parcial:'Parcial', atrasada:'Atrasada', pendiente:'Pendiente'};
+  var STORAGE_KEY = "balance-app-data-v3";
+  var LEGACY_KEYS = ["balance-app-data-v2", "balance-app-data-v1"];
 
   var state = { gastos: [], deudas: [], recurrentes: [], remindersShown: {} };
   var bannerTimer = null;
@@ -31,21 +32,65 @@
   function addDaysISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
   function addMonthsISO(iso, n){ var d = new Date(iso+'T00:00:00'); d.setMonth(d.getMonth()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 
-  function nextDueDate(d){
-    if (!d.fechaLimite) return '';
+  // ---- installment schedule (cuotas) ----
+  // Builds the expected payment schedule for a debt: one lump sum for "unica",
+  // or a series of fixed installments for recurring frequencies.
+  function buildCuotas(d){
     var freq = d.frecuencia || 'unica';
-    if (freq === 'unica') return d.fechaLimite;
-    var next = d.fechaLimite;
-    var today = todayISO();
-    var guard = 0;
-    while (next < today && guard < 1000){
-      if (freq === 'semanal') next = addDaysISO(next, 7);
-      else if (freq === 'quincenal') next = addDaysISO(next, 14);
-      else if (freq === 'mensual') next = addMonthsISO(next, 1);
-      else break;
-      guard++;
+    var total = Number(d.montoTotal||0);
+    if (!d.fechaInicio) return [];
+    if (freq === 'unica'){
+      return [{ n:1, fecha:d.fechaInicio, monto: total }];
     }
-    return next;
+    var cuota = Number(d.montoCuota||0);
+    if (cuota <= 0 || total <= 0) return [];
+    var n = (d.numCuotas && d.numCuotas>0) ? Math.round(d.numCuotas) : Math.ceil(total/cuota);
+    n = Math.min(n, 600); // sanity cap
+    var list = [];
+    var fecha = d.fechaInicio;
+    var acumulado = 0;
+    for (var i=0;i<n;i++){
+      var monto = cuota;
+      if (i === n-1){
+        var restoTeorico = total - acumulado;
+        if (restoTeorico > 0 && restoTeorico < cuota*1.5) monto = restoTeorico;
+      }
+      list.push({ n:i+1, fecha:fecha, monto: monto });
+      acumulado += monto;
+      if (freq === 'semanal') fecha = addDaysISO(fecha,7);
+      else if (freq === 'quincenal') fecha = addDaysISO(fecha,14);
+      else if (freq === 'mensual') fecha = addMonthsISO(fecha,1);
+    }
+    return list;
+  }
+
+  // Allocates total payments made (FIFO) across the schedule to derive each
+  // installment's status: pagada / parcial / atrasada / pendiente.
+  function cuotasConEstado(d){
+    var cuotas = buildCuotas(d);
+    var disponible = pagadoTotal(d);
+    var today = todayISO();
+    return cuotas.map(function(c){
+      var cubierto = Math.min(c.monto, Math.max(0, disponible));
+      disponible -= cubierto;
+      var estado;
+      if (cubierto >= c.monto - 0.01) estado = 'pagada';
+      else if (cubierto > 0) estado = 'parcial';
+      else estado = (c.fecha < today) ? 'atrasada' : 'pendiente';
+      return { n:c.n, fecha:c.fecha, monto:c.monto, cubierto:cubierto, estado:estado };
+    });
+  }
+
+  function nextPendingCuota(d){
+    var cuotas = cuotasConEstado(d);
+    for (var i=0;i<cuotas.length;i++){ if (cuotas[i].estado !== 'pagada') return cuotas[i]; }
+    return null;
+  }
+
+  function nextDueDate(d){
+    var c = nextPendingCuota(d);
+    if (c) return c.fecha;
+    return d.fechaInicio || '';
   }
 
   // ---- money inputs: live "50,000.00" formatting, typed as plain digits ----
@@ -88,6 +133,10 @@
       }
       if (!d.tipo) d.tipo = 'Otro';
       if (!d.frecuencia) d.frecuencia = 'unica';
+      if (d.fechaLimite && !d.fechaInicio) d.fechaInicio = d.fechaLimite;
+      delete d.fechaLimite;
+      if (d.montoCuota == null) d.montoCuota = (d.frecuencia === 'unica') ? Number(d.montoTotal||0) : 0;
+      if (d.numCuotas == null) d.numCuotas = null;
     });
     return data;
   }
@@ -99,10 +148,13 @@
         state = migrate(JSON.parse(raw));
         return;
       }
-      var legacy = localStorage.getItem(LEGACY_KEY);
-      if (legacy){
-        state = migrate(JSON.parse(legacy));
-        save();
+      for (var i=0;i<LEGACY_KEYS.length;i++){
+        var legacy = localStorage.getItem(LEGACY_KEYS[i]);
+        if (legacy){
+          state = migrate(JSON.parse(legacy));
+          save();
+          return;
+        }
       }
     } catch(e){
       console.error(e);
@@ -137,8 +189,19 @@
   var dFreqSel = document.getElementById('d-frecuencia');
   FRECUENCIAS.forEach(function(f){ var o=document.createElement('option'); o.value=f.value; o.textContent=f.label; dFreqSel.appendChild(o); });
 
-  [document.getElementById('g-monto'), document.getElementById('d-total'), document.getElementById('d-pagado'), document.getElementById('r-monto')]
+  [document.getElementById('g-monto'), document.getElementById('d-total'), document.getElementById('d-pagado'),
+   document.getElementById('r-monto'), document.getElementById('d-monto-cuota')]
     .forEach(function(el){ if (el) attachMoneyInput(el); });
+
+  function updateCuotaFieldsVisibility(){
+    var freq = dFreqSel.value;
+    var fields = document.getElementById('cuota-fields');
+    var fechaLabel = document.getElementById('d-fecha-label');
+    if (fields) fields.hidden = (freq === 'unica');
+    if (fechaLabel) fechaLabel.textContent = (freq === 'unica') ? 'Fecha límite' : 'Fecha de la primera cuota';
+  }
+  dFreqSel.addEventListener('change', updateCuotaFieldsVisibility);
+  updateCuotaFieldsVisibility();
 
   // ---- tabs ----
   var tabs = document.querySelectorAll('nav.tabs button');
@@ -264,6 +327,7 @@
   }
 
   var openHistory = {};
+  var openCuotas = {};
 
   function renderDeudas(){
     var wrap = document.getElementById('deudas-list');
@@ -277,7 +341,7 @@
       var sa = debtStatus(a), sb = debtStatus(b);
       var rank = {late:0, pending:1, done:2};
       if (rank[sa] !== rank[sb]) return rank[sa]-rank[sb];
-      return (a.fechaLimite||'9999').localeCompare(b.fechaLimite||'9999');
+      return (nextDueDate(a)||'9999').localeCompare(nextDueDate(b)||'9999');
     });
 
     wrap.innerHTML = '';
@@ -290,6 +354,8 @@
       var total = Number(d.montoTotal||0), pagado = pagadoTotal(d);
       var pct = total > 0 ? Math.min(100, Math.max(0, (pagado/total)*100)) : 0;
       var st = debtStatus(d);
+      var cuotas = cuotasConEstado(d);
+      var nextC = nextPendingCuota(d);
 
       var card = document.createElement('div'); card.className='debt-card' + (st==='done' ? ' done':'');
       var head = document.createElement('div'); head.className='head';
@@ -299,7 +365,7 @@
       nameWrap.appendChild(name); nameWrap.appendChild(typeTag);
       var due = document.createElement('div'); due.className='due';
       var nextDue = nextDueDate(d);
-      var freqLabel = (d.frecuencia && d.frecuencia!=='unica') ? (' · ' + FRECUENCIA_LABEL[d.frecuencia]) : '';
+      var freqLabel = (d.frecuencia && d.frecuencia!=='unica') ? (' · ' + FRECUENCIA_LABEL[d.frecuencia] + (cuotas.length ? ' · cuota '+(nextC?nextC.n:cuotas.length)+'/'+cuotas.length : '')) : '';
       due.textContent = nextDue ? ('Vence ' + formatDate(nextDue) + freqLabel) : 'Sin fecha límite';
       head.appendChild(nameWrap); head.appendChild(due);
 
@@ -320,11 +386,15 @@
 
       var actions = document.createElement('div'); actions.className='debt-actions';
       if (st !== 'done'){
-        var input = document.createElement('input'); input.type='text'; input.placeholder='Abono';
+        var input = document.createElement('input'); input.type='text';
+        var sugerido = nextC ? Math.max(0, nextC.monto - nextC.cubierto) : Math.max(0,total-pagado);
+        input.placeholder = sugerido>0 ? money(sugerido) : 'Abono';
         attachMoneyInput(input);
-        var addBtn = document.createElement('button'); addBtn.className='small'; addBtn.textContent='Abonar';
+        var addBtn = document.createElement('button'); addBtn.className='small';
+        addBtn.textContent = (cuotas.length>1 && nextC) ? ('Pagar cuota '+nextC.n) : 'Abonar';
         addBtn.addEventListener('click', function(){
           var v = parseMoneyInput(input);
+          if (!v || v<=0) v = sugerido;
           if (!v || v<=0) return;
           var restante = Math.max(0, total-pagado);
           var monto = Math.min(v, restante);
@@ -333,7 +403,7 @@
         });
         actions.appendChild(input); actions.appendChild(addBtn);
       }
-      if (d.fechaLimite){
+      if (d.fechaInicio){
         var calBtn = document.createElement('button'); calBtn.className='small cal';
         calBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Recordatorio';
         calBtn.addEventListener('click', function(){
@@ -341,7 +411,7 @@
             uid: 'deuda-'+d.id,
             title: 'Vence: ' + d.entidad,
             description: 'Pago pendiente de ' + money(Math.max(0,total-pagado)) + ' — registrado en Balance.',
-            dateISO: d.fechaLimite,
+            dateISO: d.fechaInicio,
             frecuencia: d.frecuencia
           });
         });
@@ -354,6 +424,31 @@
       foot.appendChild(pill); foot.appendChild(actions);
 
       card.appendChild(head); card.appendChild(figures); card.appendChild(track); card.appendChild(foot);
+
+      if (cuotas.length > 1){
+        var toggleCuotasBtn = document.createElement('button'); toggleCuotasBtn.className='toggle-history';
+        var cuotasOpen = !!openCuotas[d.id];
+        toggleCuotasBtn.textContent = cuotasOpen ? 'Ocultar calendario de cuotas' : 'Ver calendario de cuotas (' + cuotas.length + ')';
+        toggleCuotasBtn.addEventListener('click', function(){ openCuotas[d.id] = !openCuotas[d.id]; renderDeudas(); });
+        card.appendChild(toggleCuotasBtn);
+
+        if (cuotasOpen){
+          var sched = document.createElement('div'); sched.className='pay-history';
+          cuotas.forEach(function(c){
+            var row = document.createElement('div'); row.className='pay-row cuota-row';
+            var left2 = document.createElement('span'); left2.textContent = 'Cuota ' + c.n + ' · ' + formatDate(c.fecha);
+            var right2 = document.createElement('span'); right2.className='cuota-right';
+            var amtSpan = document.createElement('span'); amtSpan.className='amt mono'; amtSpan.textContent = money(c.monto);
+            var statePill = document.createElement('span');
+            statePill.className = 'pill ' + (c.estado==='pagada'?'done':c.estado==='atrasada'?'late':c.estado==='parcial'?'pend':'neutral');
+            statePill.textContent = ESTADO_LABEL[c.estado];
+            right2.appendChild(amtSpan); right2.appendChild(statePill);
+            row.appendChild(left2); row.appendChild(right2);
+            sched.appendChild(row);
+          });
+          card.appendChild(sched);
+        }
+      }
 
       if ((d.pagos||[]).length){
         var toggleBtn = document.createElement('button'); toggleBtn.className='toggle-history';
@@ -477,12 +572,12 @@
         main.appendChild(desc); main.appendChild(meta);
         var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(restante);
         li.appendChild(dot); li.appendChild(main); li.appendChild(amount);
-        if (d.fechaLimite){
+        if (d.fechaInicio){
           var calBtn = document.createElement('button'); calBtn.className='small cal';
           calBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
           calBtn.title = 'Agregar al calendario';
           calBtn.addEventListener('click', function(){
-            downloadICS({ uid:'deuda-'+d.id, title:'Vence: '+d.entidad, description:'Pago pendiente de '+money(restante)+' — Balance.', dateISO: d.fechaLimite, frecuencia: d.frecuencia });
+            downloadICS({ uid:'deuda-'+d.id, title:'Vence: '+d.entidad, description:'Pago pendiente de '+money(restante)+' — Balance.', dateISO: d.fechaInicio, frecuencia: d.frecuencia });
           });
           li.appendChild(calBtn);
         }
@@ -635,13 +730,21 @@
     var frecuencia = document.getElementById('d-frecuencia').value;
     var total = parseMoneyInput(document.getElementById('d-total'));
     var pagado = parseMoneyInput(document.getElementById('d-pagado'));
-    var fechaLimite = document.getElementById('d-fecha').value || '';
+    var fechaInicio = document.getElementById('d-fecha').value || '';
     var notas = document.getElementById('d-notas').value.trim();
+    var montoCuota = frecuencia === 'unica' ? total : parseMoneyInput(document.getElementById('d-monto-cuota'));
+    var numCuotasRaw = document.getElementById('d-num-cuotas').value;
+    var numCuotas = numCuotasRaw ? parseInt(numCuotasRaw,10) : null;
     if (!entidad || !total || total<=0) return;
-    var nueva = {entidad:entidad, tipo:tipo, frecuencia:frecuencia, montoTotal:total, fechaLimite:fechaLimite, notas:notas, pagos:[]};
+    if (frecuencia !== 'unica' && (!montoCuota || montoCuota<=0)){
+      showBanner('Ingresa el monto de cada cuota para esta deuda.', true);
+      return;
+    }
+    var nueva = {entidad:entidad, tipo:tipo, frecuencia:frecuencia, montoTotal:total, montoCuota:montoCuota, numCuotas:numCuotas, fechaInicio:fechaInicio, notas:notas, pagos:[]};
     if (pagado>0){ nueva.pagos.push({id:uid(), fecha: todayISO(), monto: Math.min(pagado,total)}); }
     addDeuda(nueva);
     ev.target.reset();
+    updateCuotaFieldsVisibility();
     document.getElementById('d-pagado').value = '0';
   });
 
@@ -696,6 +799,16 @@
     var wsPagos = XLSX.utils.aoa_to_sheet(pagosRows);
     wsPagos['!cols'] = [{wch:22},{wch:14},{wch:12}];
     XLSX.utils.book_append_sheet(wb, wsPagos, 'Historial de pagos');
+
+    var cuotasRows = [['Entidad','Cuota #','Fecha esperada','Monto esperado','Cubierto','Estado']];
+    state.deudas.forEach(function(d){
+      cuotasConEstado(d).forEach(function(c){
+        cuotasRows.push([d.entidad||'', c.n, c.fecha||'', c.monto, c.cubierto, ESTADO_LABEL[c.estado]||'']);
+      });
+    });
+    var wsCuotas = XLSX.utils.aoa_to_sheet(cuotasRows);
+    wsCuotas['!cols'] = [{wch:22},{wch:9},{wch:14},{wch:14},{wch:12},{wch:11}];
+    XLSX.utils.book_append_sheet(wb, wsCuotas, 'Calendario de cuotas');
 
     return wb;
   }
@@ -796,8 +909,9 @@
 
     var in3 = addDaysISO(today, 3);
     var urgentes = state.deudas.filter(function(d){
-      if (debtStatus(d)==='done' || !d.fechaLimite) return false;
-      return d.fechaLimite <= in3;
+      if (debtStatus(d)==='done') return false;
+      var due = nextDueDate(d);
+      return due && due <= in3;
     });
     var hoyDia = new Date().getDate();
     var recPendientes = state.recurrentes.filter(function(r){
