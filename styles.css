@@ -184,6 +184,20 @@ form.entry > p.hint{margin:0 0 10px; font-size:.82rem; color:var(--ink-soft);}
 .ahorro-breakdown .label{font-size:.72rem; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em;}
 .ahorro-breakdown .mono{font-size:1.05rem; font-weight:600;}
 
+.budget-row{
+  background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 14px;
+  display:flex; align-items:center; gap:12px; box-shadow:var(--shadow); margin-bottom:8px;
+}
+.budget-row .dot{width:10px; height:10px; border-radius:50%; flex:none;}
+.budget-main{flex:1; min-width:0;}
+.budget-head{display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:6px; flex-wrap:wrap;}
+.budget-head .name{font-weight:600; font-size:.92rem;}
+.budget-head .amounts{font-size:.82rem; color:var(--ink-soft);}
+.budget-row.budget-warning .bar-fill{background:var(--warning);}
+.budget-row.budget-warning .amounts{color:var(--warning);}
+.budget-row.budget-over .bar-fill{background:var(--danger);}
+.budget-row.budget-over .amounts{color:var(--danger); font-weight:600;}
+
 button.small.ghost.toggle-open{color:var(--accent);}
 
 li.rec-item{

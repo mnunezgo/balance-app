@@ -210,6 +210,26 @@
     <ul class="list" id="recurrentes-list"></ul>
 
     <div class="section-head" style="margin-top:26px;">
+      <h2>Presupuestos por categoría</h2>
+      <button type="button" class="small" id="btn-toggle-presupuesto">+ Establecer presupuesto</button>
+    </div>
+
+    <form class="entry" id="form-presupuesto" hidden>
+      <p class="hint">Elige una categoría y su límite mensual — si ya tiene presupuesto, esto lo actualiza.</p>
+      <div class="row">
+        <label>Categoría
+          <select id="pr-categoria" required></select>
+        </label>
+        <label>Límite mensual
+          <input type="text" id="pr-limite" placeholder="0.00" required>
+        </label>
+      </div>
+      <div class="actions-row"><button type="submit" class="primary">Guardar presupuesto</button></div>
+    </form>
+
+    <div id="presupuestos-list"></div>
+
+    <div class="section-head" style="margin-top:26px;">
       <h2>Gastos</h2>
       <div class="filters">
         <select id="filter-mes"></select>

@@ -23,7 +23,7 @@
   var STORAGE_KEY = "balance-app-data-v3";
   var LEGACY_KEYS = ["balance-app-data-v2", "balance-app-data-v1"];
 
-  var state = { ingresos: [], ingresosRecurrentes: [], gastos: [], deudas: [], recurrentes: [], metasAhorro: [], remindersShown: {} };
+  var state = { ingresos: [], ingresosRecurrentes: [], gastos: [], deudas: [], recurrentes: [], metasAhorro: [], presupuestos: [], remindersShown: {} };
   var bannerTimer = null;
 
   var fmt = new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN', maximumFractionDigits:2});
@@ -159,7 +159,7 @@
   }
 
   function migrate(parsed){
-    var data = { ingresos: parsed.ingresos||[], ingresosRecurrentes: parsed.ingresosRecurrentes||[], gastos: parsed.gastos||[], deudas: parsed.deudas||[], recurrentes: parsed.recurrentes||[], metasAhorro: parsed.metasAhorro||[], remindersShown: parsed.remindersShown||{} };
+    var data = { ingresos: parsed.ingresos||[], ingresosRecurrentes: parsed.ingresosRecurrentes||[], gastos: parsed.gastos||[], deudas: parsed.deudas||[], recurrentes: parsed.recurrentes||[], metasAhorro: parsed.metasAhorro||[], presupuestos: parsed.presupuestos||[], remindersShown: parsed.remindersShown||{} };
     data.deudas.forEach(function(d){
       if (!d.pagos){
         d.pagos = [];
@@ -246,7 +246,8 @@
 
   [document.getElementById('g-monto'), document.getElementById('d-total'), document.getElementById('d-pagado'),
    document.getElementById('r-monto'), document.getElementById('d-monto-cuota'),
-   document.getElementById('i-monto'), document.getElementById('ri-monto'), document.getElementById('m-monto')]
+   document.getElementById('i-monto'), document.getElementById('ri-monto'), document.getElementById('m-monto'),
+   document.getElementById('pr-limite')]
     .forEach(function(el){ if (el) attachMoneyInput(el); });
 
   function updateCuotaFieldsVisibility(){
@@ -299,11 +300,55 @@
     renderIngresosRecurrentes();
     renderIngresos();
     renderRecurrentes();
+    renderPresupuestos();
     renderGastos();
     renderDeudas();
     renderResumen();
     renderProgreso();
     renderAhorro();
+  }
+
+  function gastoPorCategoriaMes(){
+    var mes = todayISO().slice(0,7);
+    var byCat = {};
+    state.gastos.forEach(function(g){ if (monthKey(g.fecha)===mes) byCat[g.categoria] = (byCat[g.categoria]||0) + Number(g.monto||0); });
+    return byCat;
+  }
+
+  function renderPresupuestos(){
+    var wrap = document.getElementById('presupuestos-list');
+    var byCat = gastoPorCategoriaMes();
+
+    var presuSel = document.getElementById('pr-categoria');
+    if (presuSel) fillCategorySelect(presuSel, false);
+
+    wrap.innerHTML = '';
+    if (!state.presupuestos.length){
+      wrap.innerHTML = '<div class="empty">Define un límite mensual por categoría para que la app te avise cuando te estés pasando.</div>';
+      return;
+    }
+    state.presupuestos.slice().sort(function(a,b){ return a.categoria.localeCompare(b.categoria); }).forEach(function(p){
+      var gastado = byCat[p.categoria] || 0;
+      var limite = Number(p.limite||0);
+      var pct = limite>0 ? (gastado/limite)*100 : 0;
+      var estado = pct>=100 ? 'over' : pct>=80 ? 'warning' : 'ok';
+
+      var row = document.createElement('div'); row.className = 'budget-row budget-'+estado;
+      var dot = document.createElement('span'); dot.className='dot'; dot.style.background = CAT_COLOR[p.categoria]||'var(--cat-8)';
+      var main = document.createElement('div'); main.className='budget-main';
+      var head = document.createElement('div'); head.className='budget-head';
+      var name = document.createElement('span'); name.className='name'; name.textContent = p.categoria;
+      var amounts = document.createElement('span'); amounts.className='mono amounts'; amounts.textContent = money(gastado) + ' de ' + money(limite);
+      head.appendChild(name); head.appendChild(amounts);
+      var track = document.createElement('div'); track.className='bar-track';
+      var fill = document.createElement('div'); fill.className='bar-fill'; fill.style.width = Math.min(100,pct)+'%';
+      track.appendChild(fill);
+      main.appendChild(head); main.appendChild(track);
+      var del = document.createElement('button'); del.className='del'; del.setAttribute('aria-label','Eliminar presupuesto'); del.textContent='✕';
+      del.addEventListener('click', function(){ deletePresupuesto(p.id); });
+      row.appendChild(dot); row.appendChild(main); row.appendChild(del);
+      wrap.appendChild(row);
+    });
   }
 
   function renderIngresosRecurrentes(){
@@ -673,6 +718,15 @@
 
     var byCat = {};
     gastosMes.forEach(function(g){ byCat[g.categoria] = (byCat[g.categoria]||0) + Number(g.monto||0); });
+
+    var overBudget = state.presupuestos.filter(function(p){ return (byCat[p.categoria]||0) > Number(p.limite||0); })
+      .sort(function(a,b){ return ((byCat[b.categoria]||0)-Number(b.limite||0)) - ((byCat[a.categoria]||0)-Number(a.limite||0)); });
+    if (overBudget.length){
+      var worst = overBudget[0];
+      var exceso = (byCat[worst.categoria]||0) - Number(worst.limite||0);
+      recs.push({level:'critical', text:'Superaste tu presupuesto de "' + worst.categoria + '" por ' + money(exceso) + ' (llevas ' + money(byCat[worst.categoria]||0) + ' de ' + money(worst.limite) + ')' + (overBudget.length>1 ? ', y ' + (overBudget.length-1) + ' categoría(s) más también se pasaron.' : '.')});
+    }
+
     var topCat = null, topVal = 0;
     Object.keys(byCat).forEach(function(c){ if (byCat[c] > topVal){ topVal = byCat[c]; topCat = c; } });
     if (topCat && totalGastosMes>0 && (topVal/totalGastosMes) > 0.4){
@@ -1077,6 +1131,17 @@
     save(); renderAll();
   }
 
+  // ---- presupuestos por categoría ----
+  function upsertPresupuesto(categoria, limite){
+    var existing = state.presupuestos.find(function(p){ return p.categoria===categoria; });
+    if (existing){ existing.limite = limite; }
+    else { state.presupuestos.push({id: uid(), categoria:categoria, limite:limite, createdAt: Date.now()}); }
+    save(); renderAll();
+  }
+  function deletePresupuesto(id){
+    state.presupuestos = state.presupuestos.filter(function(p){ return p.id!==id; }); save(); renderAll();
+  }
+
   // ---- data ops ----
   function addIngreso(i){
     i.id = uid(); i.createdAt = Date.now();
@@ -1180,6 +1245,20 @@
     if (!nombre || !montoObjetivo || montoObjetivo<=0) return;
     addMetaAhorro({nombre:nombre, montoObjetivo:montoObjetivo, fechaObjetivo:fechaObjetivo});
     ev.target.reset();
+  });
+
+  document.getElementById('btn-toggle-presupuesto').addEventListener('click', function(){
+    var form = document.getElementById('form-presupuesto');
+    form.hidden = !form.hidden;
+  });
+  document.getElementById('form-presupuesto').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    var categoria = document.getElementById('pr-categoria').value;
+    var limite = parseMoneyInput(document.getElementById('pr-limite'));
+    if (!categoria || !limite || limite<=0) return;
+    upsertPresupuesto(categoria, limite);
+    ev.target.reset();
+    document.getElementById('form-presupuesto').hidden = true;
   });
 
   document.getElementById('form-gasto').addEventListener('submit', function(ev){
@@ -1303,6 +1382,16 @@
     var wsAhorro = XLSX.utils.aoa_to_sheet(ahorroRows);
     wsAhorro['!cols'] = [{wch:20},{wch:14},{wch:14},{wch:12},{wch:12},{wch:14},{wch:14}];
     XLSX.utils.book_append_sheet(wb, wsAhorro, 'Metas de ahorro');
+
+    var byCatExport = gastoPorCategoriaMes();
+    var presupuestoRows = [['Categoría','Límite mensual','Gastado este mes','Restante','% usado']];
+    state.presupuestos.slice().sort(function(a,b){ return a.categoria.localeCompare(b.categoria); }).forEach(function(p){
+      var gastado = byCatExport[p.categoria]||0, limite = Number(p.limite)||0;
+      presupuestoRows.push([p.categoria, limite, gastado, limite-gastado, limite>0?Math.round((gastado/limite)*100)+'%':'']);
+    });
+    var wsPresu = XLSX.utils.aoa_to_sheet(presupuestoRows);
+    wsPresu['!cols'] = [{wch:16},{wch:14},{wch:14},{wch:12},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, wsPresu, 'Presupuestos');
 
     return wb;
   }
