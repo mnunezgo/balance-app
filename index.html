@@ -118,35 +118,37 @@
     <form class="entry" id="form-ingreso-recurrente" hidden>
       <p class="hint">Cada trabajo puede pagar distinto — registra uno por cada frecuencia real.</p>
       <div class="row">
-        <label>Nombre
-          <input type="text" id="ri-nombre" placeholder="Ej. Salario oficina, Freelance..." required>
-        </label>
-        <label>Fuente
+        <label><span class="field-label">Fuente</span>
           <select id="ri-fuente" required></select>
         </label>
-        <label>Monto por pago
+        <label><span class="field-label">Monto por pago</span>
           <input type="text" id="ri-monto" placeholder="0.00" required>
         </label>
-        <label>Frecuencia de pago
+        <label><span class="field-label">Frecuencia de pago</span>
           <select id="ri-frecuencia" required></select>
         </label>
       </div>
       <div class="row" id="ri-fields-mensual">
-        <label>Día del mes
-          <input type="number" id="ri-dia" min="1" max="28" placeholder="1-28">
+        <label><span class="field-label">Día del mes</span>
+          <input type="number" id="ri-dia" min="1" max="28" placeholder="1-28" required>
         </label>
       </div>
       <div class="row" id="ri-fields-quincenal" hidden>
-        <label>Primer día de pago
+        <label><span class="field-label">Primer día de pago</span>
           <input type="number" id="ri-dia1" min="1" max="31" placeholder="Ej. 15" value="15">
         </label>
-        <label>Segundo día de pago
+        <label><span class="field-label">Segundo día de pago</span>
           <input type="number" id="ri-dia2" min="1" max="31" placeholder="Ej. 30 (o el último día)" value="30">
         </label>
       </div>
       <div class="row" id="ri-fields-periodica" hidden>
-        <label>Fecha de un pago reciente
-          <input type="date" id="ri-fecha-inicio">
+        <label><span class="field-label">Fecha de un pago reciente</span>
+          <input type="date" id="ri-fecha-inicio" required>
+        </label>
+      </div>
+      <div class="row">
+        <label><span class="field-label">Nombre (opcional)</span>
+          <input type="text" id="ri-nombre" placeholder="Ej. Salario oficina, Freelance proyecto X...">
         </label>
       </div>
       <div class="actions-row"><button type="submit" class="primary">Guardar recurrente</button></div>
@@ -164,13 +166,13 @@
 
     <form class="entry" id="form-ingreso">
       <div class="row">
-        <label>Fecha
+        <label><span class="field-label">Fecha</span>
           <input type="date" id="i-fecha" required>
         </label>
-        <label>Fuente
+        <label><span class="field-label">Fuente</span>
           <select id="i-fuente" required></select>
         </label>
-        <label>Monto
+        <label><span class="field-label">Monto</span>
           <input type="text" id="i-monto" placeholder="0.00" required>
         </label>
       </div>
@@ -191,30 +193,32 @@
 
     <form class="entry" id="form-recurrente" hidden>
       <div class="row">
-        <label>Nombre
-          <input type="text" id="r-nombre" placeholder="Ej. Renta, Netflix, Seguro del auto..." required>
-        </label>
-        <label>Categoría
+        <label><span class="field-label">Categoría</span>
           <select id="r-categoria" required></select>
         </label>
-        <label id="r-subcategoria-field" hidden>Tipo
+        <label id="r-subcategoria-field" hidden><span class="field-label">Tipo</span>
           <select id="r-subcategoria"></select>
         </label>
-        <label>Monto
+        <label><span class="field-label">Monto</span>
           <input type="text" id="r-monto" placeholder="0.00" required>
         </label>
-        <label>Frecuencia
+        <label><span class="field-label">Frecuencia</span>
           <select id="r-frecuencia" required></select>
         </label>
       </div>
       <div class="row" id="r-fields-mensual">
-        <label>Día del mes
-          <input type="number" id="r-dia" min="1" max="28" placeholder="1-28">
+        <label><span class="field-label">Día del mes</span>
+          <input type="number" id="r-dia" min="1" max="28" placeholder="1-28" required>
         </label>
       </div>
       <div class="row" id="r-fields-periodica" hidden>
-        <label><span id="r-fecha-label">Fecha de un pago reciente</span>
-          <input type="date" id="r-fecha-inicio">
+        <label><span class="field-label" id="r-fecha-label">Fecha de un pago reciente</span>
+          <input type="date" id="r-fecha-inicio" required>
+        </label>
+      </div>
+      <div class="row">
+        <label><span class="field-label">Nombre (opcional)</span>
+          <input type="text" id="r-nombre" placeholder="Ej. Compañía o detalle — CFE, Telmex, Seguro del auto...">
         </label>
       </div>
       <div class="actions-row"><button type="submit" class="primary">Guardar recurrente</button></div>
@@ -230,10 +234,10 @@
     <form class="entry" id="form-presupuesto" hidden>
       <p class="hint">Elige una categoría y su límite mensual — si ya tiene presupuesto, esto lo actualiza.</p>
       <div class="row">
-        <label>Categoría
+        <label><span class="field-label">Categoría</span>
           <select id="pr-categoria" required></select>
         </label>
-        <label>Límite mensual
+        <label><span class="field-label">Límite mensual</span>
           <input type="text" id="pr-limite" placeholder="0.00" required>
         </label>
       </div>
@@ -252,16 +256,16 @@
 
     <form class="entry" id="form-gasto">
       <div class="row">
-        <label>Fecha
+        <label><span class="field-label">Fecha</span>
           <input type="date" id="g-fecha" required>
         </label>
-        <label>Categoría
+        <label><span class="field-label">Categoría</span>
           <select id="g-categoria" required></select>
         </label>
-        <label id="g-subcategoria-field" hidden>Tipo
+        <label id="g-subcategoria-field" hidden><span class="field-label">Tipo</span>
           <select id="g-subcategoria"></select>
         </label>
-        <label>Monto
+        <label><span class="field-label">Monto</span>
           <input type="text" id="g-monto" placeholder="0.00" required>
         </label>
       </div>
@@ -288,32 +292,32 @@
 
     <form class="entry" id="form-deuda">
       <div class="row">
-        <label>Acreedor / entidad
+        <label><span class="field-label">Acreedor / entidad</span>
           <input type="text" id="d-entidad" placeholder="Ej. Tarjeta BAC, Préstamo Juan..." required>
         </label>
-        <label>Tipo de deuda
+        <label><span class="field-label">Tipo de deuda</span>
           <select id="d-tipo" required></select>
         </label>
-        <label>Frecuencia de pago
+        <label><span class="field-label">Frecuencia de pago</span>
           <select id="d-frecuencia" required></select>
         </label>
       </div>
       <div class="row">
-        <label>Monto total de la deuda
+        <label><span class="field-label">Monto total de la deuda</span>
           <input type="text" id="d-total" placeholder="0.00" required>
         </label>
-        <label>Ya pagado
+        <label><span class="field-label">Ya pagado</span>
           <input type="text" id="d-pagado" placeholder="0.00" value="0">
         </label>
-        <label><span id="d-fecha-label">Fecha límite</span>
+        <label><span class="field-label" id="d-fecha-label">Fecha límite</span>
           <input type="date" id="d-fecha">
         </label>
       </div>
       <div class="row" id="cuota-fields" hidden>
-        <label>Monto de cada cuota
-          <input type="text" id="d-monto-cuota" placeholder="0.00">
+        <label><span class="field-label">Monto de cada cuota</span>
+          <input type="text" id="d-monto-cuota" placeholder="0.00" required>
         </label>
-        <label>Número de cuotas (opcional)
+        <label><span class="field-label">Número de cuotas (opcional)</span>
           <input type="number" id="d-num-cuotas" min="1" placeholder="Ej. 12">
         </label>
       </div>
@@ -342,13 +346,13 @@
 
     <form class="entry" id="form-meta-ahorro">
       <div class="row">
-        <label>Nombre de la meta
+        <label><span class="field-label">Nombre de la meta</span>
           <input type="text" id="m-nombre" placeholder="Ej. Fondo de emergencia, Vacaciones..." required>
         </label>
-        <label>Monto objetivo
+        <label><span class="field-label">Monto objetivo</span>
           <input type="text" id="m-monto" placeholder="0.00" required>
         </label>
-        <label>Fecha meta (opcional)
+        <label><span class="field-label">Fecha meta (opcional)</span>
           <input type="date" id="m-fecha">
         </label>
       </div>

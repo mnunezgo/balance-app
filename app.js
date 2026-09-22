@@ -302,6 +302,9 @@
     var fechaLabel = document.getElementById('d-fecha-label');
     if (fields) fields.hidden = (freq === 'unica');
     if (fechaLabel) fechaLabel.textContent = (freq === 'unica') ? 'Fecha límite' : 'Fecha de la primera cuota';
+    // A required field inside a hidden container still blocks native form
+    // validation (hidden ≠ exempt), so toggle "required" with visibility.
+    document.getElementById('d-monto-cuota').required = (freq !== 'unica');
   }
   dFreqSel.addEventListener('change', updateCuotaFieldsVisibility);
   updateCuotaFieldsVisibility();
@@ -424,7 +427,7 @@
       box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
       box.addEventListener('click', function(){ toggleIngresoRecurrente(r, fecha, linked); });
       var main = document.createElement('div'); main.className='main';
-      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = r.nombre;
+      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = r.nombre || r.fuente;
       var meta = document.createElement('div'); meta.className='meta'; meta.textContent = r.fuente + ' · ' + INGRESO_FREQ_LABEL[r.frecuencia] + ' · ' + formatDate(fecha);
       main.appendChild(desc); main.appendChild(meta);
       var amount = document.createElement('div'); amount.className='amount mono'; amount.textContent = money(r.monto);
@@ -439,7 +442,7 @@
     if (existingIngreso){
       deleteIngreso(existingIngreso.id);
     } else {
-      addIngreso({fecha: fecha, fuente: r.fuente, monto: r.monto, descripcion: r.nombre, recurrenteId: r.id});
+      addIngreso({fecha: fecha, fuente: r.fuente, monto: r.monto, descripcion: r.nombre || r.fuente, recurrenteId: r.id});
     }
   }
 
@@ -505,7 +508,7 @@
       box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
       box.addEventListener('click', function(){ toggleRecurrente(r, fecha, linked); });
       var main = document.createElement('div'); main.className='main';
-      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = r.nombre;
+      var desc = document.createElement('div'); desc.className='desc'; desc.textContent = r.nombre || r.subcategoria || r.categoria;
       var catLabel = r.categoria + (r.subcategoria ? ' · '+r.subcategoria : '');
       var meta = document.createElement('div'); meta.className='meta'; meta.textContent = catLabel + ' · ' + GASTO_FREQ_LABEL[r.frecuencia||'mensual'] + ' · ' + formatDate(fecha);
       main.appendChild(desc); main.appendChild(meta);
@@ -521,7 +524,7 @@
     if (existingGasto){
       deleteGasto(existingGasto.id);
     } else {
-      addGasto({fecha: fecha, categoria: r.categoria, subcategoria: r.subcategoria||'', monto: r.monto, descripcion: r.nombre, recurrenteId: r.id});
+      addGasto({fecha: fecha, categoria: r.categoria, subcategoria: r.subcategoria||'', monto: r.monto, descripcion: r.nombre || r.subcategoria || r.categoria, recurrenteId: r.id});
     }
   }
 
@@ -1260,6 +1263,10 @@
     document.getElementById('ri-fields-mensual').hidden = (freq !== 'mensual');
     document.getElementById('ri-fields-quincenal').hidden = (freq !== 'quincenal');
     document.getElementById('ri-fields-periodica').hidden = (freq !== 'semanal' && freq !== 'catorcenal');
+    // A required field inside a hidden container still blocks native form
+    // validation (hidden ≠ exempt), so toggle "required" with visibility.
+    document.getElementById('ri-dia').required = (freq === 'mensual');
+    document.getElementById('ri-fecha-inicio').required = (freq === 'semanal' || freq === 'catorcenal');
   }
   var riFreqSel = document.getElementById('ri-frecuencia');
   INGRESO_FRECUENCIAS.forEach(function(f){ var o=document.createElement('option'); o.value=f.value; o.textContent=f.label; riFreqSel.appendChild(o); });
@@ -1272,7 +1279,7 @@
     var fuente = document.getElementById('ri-fuente').value;
     var monto = parseMoneyInput(document.getElementById('ri-monto'));
     var frecuencia = document.getElementById('ri-frecuencia').value;
-    if (!nombre || !monto || monto<=0) return;
+    if (!monto || monto<=0) return;
     var nuevo = {id: uid(), nombre:nombre, fuente:fuente, monto:monto, frecuencia:frecuencia, createdAt: Date.now()};
     if (frecuencia === 'mensual'){
       var dia = parseInt(document.getElementById('ri-dia').value, 10);
@@ -1370,6 +1377,10 @@
     document.getElementById('r-fields-mensual').hidden = (freq !== 'mensual');
     document.getElementById('r-fields-periodica').hidden = (freq === 'mensual');
     document.getElementById('r-fecha-label').textContent = (freq === 'anual') ? 'Fecha del cargo (cualquier año)' : 'Fecha de un pago reciente';
+    // A required field inside a hidden container still blocks native form
+    // validation (hidden ≠ exempt), so toggle "required" with visibility.
+    document.getElementById('r-dia').required = (freq === 'mensual');
+    document.getElementById('r-fecha-inicio').required = (freq !== 'mensual');
   }
   var rFreqSel = document.getElementById('r-frecuencia');
   GASTO_FRECUENCIAS.forEach(function(f){ var o=document.createElement('option'); o.value=f.value; o.textContent=f.label; rFreqSel.appendChild(o); });
@@ -1384,7 +1395,7 @@
     var subcategoria = document.getElementById('r-subcategoria').value;
     var monto = parseMoneyInput(document.getElementById('r-monto'));
     var frecuencia = document.getElementById('r-frecuencia').value;
-    if (!nombre || !monto || monto<=0) return;
+    if (!monto || monto<=0) return;
     var nuevo = {id: uid(), nombre:nombre, categoria:categoria, subcategoria:subcategoria, monto:monto, frecuencia:frecuencia, createdAt: Date.now()};
     if (frecuencia === 'mensual'){
       var dia = parseInt(document.getElementById('r-dia').value, 10);

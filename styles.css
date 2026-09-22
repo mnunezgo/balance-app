@@ -91,6 +91,7 @@ section.panel.active{display:block;}
 form.entry{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:18px; box-shadow:var(--shadow);}
 form.entry .row{display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:10px;}
 form.entry label{display:flex; flex-direction:column; gap:5px; font-size:.8rem; color:var(--ink-soft); font-weight:600;}
+form.entry label:has(> [required]) > .field-label::after{content:" *"; color:var(--danger); font-weight:700;}
 form.entry input, form.entry select, form.entry textarea{
   font:inherit; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink);
 }
